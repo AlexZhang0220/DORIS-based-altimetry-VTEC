@@ -17,18 +17,18 @@ doy = process_epoch.timetuple().tm_yday
 
 settings = Thresholds(max_dion_gap=0.2, max_obs_epoch_gap=120, min_obs_count=50, ele_cut_off=0) 
 
-file = "./passdetectionTest/sp3/ssaja320.b19350.e19360.DG_.sp3"
+orbit_file = "./STEC Leveling/sp3/ssaja320.b19350.e19360.DG_.sp3"
 orbit = OrbitStorage()
-orbit.read_sp3(file, 'L39')
+orbit.read_sp3(orbit_file, 'L39') # L39 is Jason-3
 
-file = './passdetectionTest/sinex/ids22d01.snx'
+station_file = './STEC Leveling/sinex/ids22d01.snx'
 stations = StationStorage()
-stations.read_sinex(file)
+stations.read_sinex(station_file)
 
 obs = DORISStorage()       
 
 
-file = './passdetectionTest/rinexobs/ja3rx'+str(year)[-2:]+str(doy)
+file = './STEC Leveling/rinexobs/ja3rx'+str(year)[-2:]+str(doy)
 obs.read_rinex_300(process_epoch, file, orbit, stations, settings)
 
 passes = []
@@ -37,10 +37,6 @@ for station_obs in obs.storage:
         continue
     else:
         passes += passdetection(station_obs, settings)
-# aaaa = sum([len(station_obs) for station_obs in obs.storage])
-# bbbb = sum([len(pass1.STEC) for pass1 in passes])
-# print(bbbb)
-# print(aaaa)  
 file_path = './vtec/DOY'+str(doy)+'.h5' 
 
 with h5py.File(file_path, 'a') as f:
