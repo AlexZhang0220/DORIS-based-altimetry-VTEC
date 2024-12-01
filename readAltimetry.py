@@ -17,7 +17,7 @@ import warnings
 import time
 start_time = time.time()
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-rms_results_np = []
+
 def inverse_distance_weighting(points, values, target_point, power=2):
 
     distances = np.linalg.norm(points - target_point, axis=1)
@@ -35,7 +35,6 @@ def nearest_neighbor(points, values, target_point, power=2):
 
     return values[idx]
 
-# percentage of data eliminated from sigmatest; delete_point for storage of deleted indices
 def sigmatest(doris_vtec_list, ipp_lat_int, ipp_lon_int, indices):
     std = np.std(doris_vtec_list) # if the TEC values are 3 std away from the base_value, not valid.
     mean = np.mean(doris_vtec_list)
@@ -254,18 +253,6 @@ for day in range(30,31):
             # vtec_int_igs_inpo = np.where(vtec_int_igs_inpo == None, np.nan, vtec_int_igs_inpo).astype(float)
             vtec_int_igs = np.where(vtec_int_igs == None, np.nan, vtec_int_igs).astype(float)
             vtec_altimetry = np.where(vtec_altimetry == None, np.nan, vtec_altimetry).astype(float)
-            # print(np.mean(std_vtec))
-
-            # bins = [-90,-60, -20, 20, 60, 90]
-
-            # # 使用numpy的digitize函数进行分组
-            # indices = np.digitize(ipp_lat_list, bins)
-
-            # # 使用列表推导式，结合numpy计算每个区间的RMS
-            # rms_results_np.append([
-            #     np.sqrt(np.mean(np.array(diff_doris_alt)[indices == q] ** 2)) if np.any(indices == q) else None
-            #     for q in range(1, len(bins))
-            # ])
 
             mask = ~np.isnan(vtec_int_doris)
             a = [aa for aa in mask if aa == 1]
