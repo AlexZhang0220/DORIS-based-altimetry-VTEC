@@ -21,7 +21,7 @@ orbit_file = "./STEC Leveling/sp3/ssaja320.b19350.e19360.DG_.sp3"
 orbit = OrbitStorage()
 orbit.read_sp3(orbit_file, 'L39') # L39 is Jason-3
 
-station_file = './STEC Leveling/sinex/ids22d01.snx'
+station_file = './STEC Leveling/sinex/ids22d01.snx' # station coord file can be found at https://ids-doris.org/documents/BC/stations/ids.snx
 stations = StationStorage()
 stations.read_sinex(station_file)
 
