@@ -14,8 +14,8 @@ start_time = time.time()
 process_epoch = datetime(2024,5,8) # the data in user-defined DAY will be processed
 year = process_epoch.year
 doy = process_epoch.timetuple().tm_yday
-ion_file = './passdetectionTest/igsion/igsg'+str(doy)+'0.'+str(year)[-2:]+'i'
-ion_file = './passdetectionTest/igsion/IGS0OPSFIN_' + str(year) + str(doy)+'0000_01D_02H_GIM.INX'
+ion_file = './STEC Leveling/igsion/igsg'+str(doy)+'0.'+str(year)[-2:]+'i'
+ion_file = './STEC Leveling/igsion/IGS0OPSFIN_' + str(year) + str(doy)+'0000_01D_02H_GIM.INX'
 scale_factor_doris = 0.925
 
 stec_rms = []
