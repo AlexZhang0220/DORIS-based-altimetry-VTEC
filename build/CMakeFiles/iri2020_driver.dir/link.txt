@@ -1,0 +1,3 @@
+D:\CMake\bin\cmake.exe -E rm -f CMakeFiles\iri2020_driver.dir/objects.a
+D:\mingw64\bin\ar.exe qc CMakeFiles\iri2020_driver.dir/objects.a @CMakeFiles\iri2020_driver.dir\objects1.rsp
+D:\mingw64\bin\gfortran.exe -g -Wl,--whole-archive CMakeFiles\iri2020_driver.dir/objects.a -Wl,--no-whole-archive -o "D:\Master Thesis\iri2020\src\iri2020\iri2020_driver.exe" -Wl,--out-implib,libiri2020_driver.dll.a -Wl,--major-image-version,0,--minor-image-version,0

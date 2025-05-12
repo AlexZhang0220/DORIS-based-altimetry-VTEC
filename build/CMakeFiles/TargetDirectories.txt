@@ -1,0 +1,8 @@
+D:/Master Thesis/build/CMakeFiles/iri2020_driver.dir
+D:/Master Thesis/build/CMakeFiles/test.dir
+D:/Master Thesis/build/CMakeFiles/edit_cache.dir
+D:/Master Thesis/build/CMakeFiles/rebuild_cache.dir
+D:/Master Thesis/build/src/CMakeFiles/iri.dir
+D:/Master Thesis/build/src/CMakeFiles/test.dir
+D:/Master Thesis/build/src/CMakeFiles/edit_cache.dir
+D:/Master Thesis/build/src/CMakeFiles/rebuild_cache.dir
