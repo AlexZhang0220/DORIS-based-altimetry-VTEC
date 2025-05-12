@@ -342,7 +342,7 @@ if __name__ == '__main__':
     start_year = 2024
     start_month = 5
     start_day = 8
-    process_days = 10
+    process_days = 5
     start_epoch = datetime(start_year, start_month, start_day)
     start_doy = start_epoch.timetuple().tm_yday
 
@@ -359,7 +359,7 @@ if __name__ == '__main__':
         min_obs_count_list = [30]
         lat_range_list = [1]
         lon_range_list = [lat * 2 for lat in lat_range_list]
-        max_lat_gap = 6
+        max_lat_gap = 10
         roti_threshold = 1
 
         results_shape = (len(ele_mask_list), len(min_obs_count_list), len(lon_range_list), 4)
@@ -515,6 +515,7 @@ if __name__ == '__main__':
                                     roti_values.append(roti)   
 
                             elif roti >= roti_threshold: 
+                                continue
                                 if (indices := find_doris_indices(d_lon, d_lat, min_obs_count, 6, 6, lat, lon)):
                                     sel_lon = d_lon[indices]
                                     sel_lat = d_lat[indices]
