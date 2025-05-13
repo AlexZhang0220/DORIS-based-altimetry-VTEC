@@ -4,266 +4,170 @@ import h5py
 import time
 import csv
 import matplotlib.pyplot as plt
-from scipy.interpolate import RegularGridInterpolator
-from scipy.spatial.distance import cdist
-from astropy.time import Time
 from datetime import datetime, timedelta
 from readFile import read_ionFile
-from tools import haversine_vec, compute_lat_lon_distances
+from tools import haversine_vec
 
 # inverse distance weighting
-def idw(dist, values):
-    # elevation weighting is not better
-    dist[dist == 0] = 1e-12  # Avoid division by zero
-    weights = 1 / dist 
+def inverse_distance_weighting(distances, values):
+    distances[distances == 0] = 1e-12  
+    weights = 1 / distances
     weights /= weights.sum(axis=0)
     return np.dot(values, weights).item()
 
 # GIM VTEC interpolation function
-def interpolate_gim_vtec(gim_vtec, ipp_epoch, ipp_lat, ipp_lon):
-    max_lat_index = 71
-    max_lon_index = 73
-    ipp_epoch = Time(ipp_epoch, format='mjd').to_datetime()
-    interp_funcs = [
-        RegularGridInterpolator((list(range(0, max_lat_index)), list(range(0, max_lon_index))), gim_vtec[i], method='linear')
+def interpolate_gim_vtec(gim_data, mjd_times, lats, lons):
+    from scipy.interpolate import RegularGridInterpolator
+    from astropy.time import Time
+
+    max_lat_idx, max_lon_idx = 71, 73
+    datetimes = Time(mjd_times, format='mjd').to_datetime()
+    
+    interpolators = [
+        RegularGridInterpolator(
+            (range(max_lat_idx), range(max_lon_idx)), gim_data[i], method='linear'
+        )
         for i in range(13)
     ]
-
-    interpolated_vtec = []
-    for i, epoch in enumerate(ipp_epoch):
-        lat_idx = (ipp_lat[i] + 87.5) / 2.5
-        lon_idx = (ipp_lon[i] + 180) / 5
-        time_index = epoch.hour // 2
-        time_scale = ((epoch.hour + epoch.minute / 60 + epoch.second / 3600) % 2) / 2
+    
+    vtec_values = []
+    for dt, lat, lon in zip(datetimes, lats, lons):
+        lat_idx = (lat + 87.5) / 2.5
+        lon_idx = (lon + 180) / 5
+        hour_idx = dt.hour // 2
+        time_frac = ((dt.hour + dt.minute / 60 + dt.second / 3600) % 2) / 2
         vtec = (
-            (1 - time_scale) * interp_funcs[time_index]([lat_idx, lon_idx])[0] +
-            time_scale * interp_funcs[time_index + 1]([lat_idx, lon_idx])[0]
+            (1 - time_frac) * interpolators[hour_idx]([lat_idx, lon_idx])[0] +
+            time_frac * interpolators[hour_idx + 1]([lat_idx, lon_idx])[0]
         )
-        interpolated_vtec.append(vtec)
-    return interpolated_vtec
+        vtec_values.append(vtec)
+    
+    return vtec_values
 
-# for altimetry data where the 2D list has various columns for each row
-def load_and_flatten(file_path):
-    with open(file_path, 'r') as file:
-        data = json.load(file)
-        return np.array([item for sublist in data for item in sublist])
+# for altimetry data passes are recorded in different columns. convert them into one
+def load_and_flatten_json(path):
+    with open(path, 'r') as f:
+        data = json.load(f)
+    return np.array([item for sublist in data for item in sublist])
 
 # Load and preprocess altimetry data
-def load_altimetry_data(month, day):    
-    alt_lon = load_and_flatten(f'./AltimetryData/Orbit/{month}{day}glon.json')
-    alt_lat = load_and_flatten(f'./AltimetryData/Orbit/{month}{day}glat.json')
-    alt_epoch = load_and_flatten(f'./AltimetryData/Epoch/{month}{day}sec.json')
-    alt_vtec = load_and_flatten(f'./AltimetryData/Dion/{month}{day}dion.json')
-
-    valid_indices = ~np.isnan(alt_vtec)
-    alt_lon, alt_lat, alt_epoch, alt_vtec = (
-        arr[valid_indices] for arr in (alt_lon, alt_lat, alt_epoch, alt_vtec)
-    )
-    alt_lon = np.array([lon - 360 if lon >= 180 else lon for lon in alt_lon])
+def load_altimetry_data(month, day):
     base_time = np.datetime64('1985-01-01T00:00:00')
-    mjd_epoch = np.datetime64('1858-11-17T00:00:00')
-    alt_epoch = ((base_time + alt_epoch.astype('timedelta64[s]')) - mjd_epoch) / np.timedelta64(1, 'D')
-    alt_vtec = -13.575e9**2 / 40.3 * alt_vtec / 1e16
-    return alt_lon, alt_lat, alt_epoch, alt_vtec
+    mjd_ref = np.datetime64('1858-11-17T00:00:00')
+
+    lon = load_and_flatten_json(f'./AltimetryData/Orbit/{month}{day}glon.json')
+    lat = load_and_flatten_json(f'./AltimetryData/Orbit/{month}{day}glat.json')
+    sec = load_and_flatten_json(f'./AltimetryData/Epoch/{month}{day}sec.json')
+    dion = load_and_flatten_json(f'./AltimetryData/Dion/{month}{day}dion.json')
+
+    valid = ~np.isnan(dion)
+    lon, lat, sec, dion = (arr[valid] for arr in (lon, lat, sec, dion))
+    lon = np.where(lon >= 180, lon - 360, lon)
+    mjd = ((base_time + sec.astype('timedelta64[s]')) - mjd_ref) / np.timedelta64(1, 'D')
+    ion_delay = -13.575e9**2 / 40.3 * dion / 1e16
+    return lon, lat, mjd, ion_delay
 
 # Load and preprocess doris data
+# Change of doris file name (with the presence of cycle slip detection) -- check that part 
 def load_doris_data(year, doy):
+    filepath = f'./DORISVTEC/{year}/DOY{doy:03d}.h5'
+    lon, lat, epoch, vtec, elev = [], [], [], [], []
 
-    longitudes = []
-    latitudes = []
-    epochs = []
-    vtec_values = []
-    elevations = []
-    file_path = f'./DORISVTEC/{year}/DOY{doy:03d}.h5'
-    # file_path = f'./DOY{doy:03d}.h5'a
+    with h5py.File(filepath, 'r') as f:
+        group = f[f'/y{year}/{doy:03d}']
+        for pass_id in group:
+            data = group[pass_id]
+            lon.extend(data['ipp_lon'][:])
+            lat.extend(data['ipp_lat'][:])
+            epoch.extend(data['epoch'][:])
+            vtec.extend(data['vtec'][:])
+            elev.extend(data['elevation'][:])
 
-    with h5py.File(file_path, 'r') as file:
-        # passes_group = file[f'/y{year}/d{doy:03d}/ele_cut_0']
-        passes_group = file[f'/y{year}/{doy:03d}/count{30}']
+    return map(np.array, (lon, lat, epoch, vtec, elev))
 
-        for pass_index in passes_group:
-            # Access the data for each pass
-            pass_data = passes_group[pass_index]
-            longitudes.extend(pass_data['ipp_lon'][:])
-            latitudes.extend(pass_data['ipp_lat'][:])
-            epochs.extend(pass_data['epoch'][:])
-            vtec_values.extend(pass_data['vtec'][:])
-            elevations.extend(pass_data['elevation'][:])
+def save_doris_results_to_csv(data_path, output_path):
+    data = np.load(data_path)
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        ele_n, obs_n, lat_n, _ = data.shape
 
-    return (
-        np.array(longitudes),
-        np.array(latitudes),
-        np.array(epochs),
-        np.array(vtec_values),
-        np.array(elevations),
-    )
-
-
-def doris_npy2csv(file_name: str, out_file):
-    data = np.load(file_name)
-    with open(out_file, mode="w", newline="") as file:
-        writer = csv.writer(file)
-        
-        ele_count, min_obs_count, lat_range_count, _ = data.shape
-        
-        # 遍历第一维（ele）
-        for ele_idx in range(ele_count):
-            ele_header = f"Ele {ele_idx + 1}"  # Ele 标识
-            
-            for metric_idx, metric_name in enumerate(["RMS", "Percent"]):  # 遍历第四维
-                # 写入表格标题
-                writer.writerow([f"{ele_header} - {metric_name}"])
-                
-                # 写入列标头（lat_range）
-                lat_headers = [f"Lat {j+1}" for j in range(lat_range_count)]
-                writer.writerow(["Min Obs \\ Lat Range"] + lat_headers)
-                
-                # 写入表格数据
-                for min_obs_idx in range(min_obs_count):
-                    row_data = [f"Min Obs {min_obs_idx + 1}"]  # 行标头
-                    row_data.extend(data[ele_idx, min_obs_idx, :, metric_idx])  # 取出一行的数据
-                    writer.writerow(row_data)
-                
-                # 空行分隔不同表格
+        for ele in range(ele_n):
+            for metric_idx, metric in enumerate(["RMS", "Percent"]):
+                writer.writerow([f"Ele {ele + 1} - {metric}"])
+                writer.writerow(["Min Obs \\ Lat Range"] + [f"Lat {j+1}" for j in range(lat_n)])
+                for obs in range(obs_n):
+                    row = [f"Min Obs {obs + 1}"] + data[ele, obs, :, metric_idx].tolist()
+                    writer.writerow(row)
                 writer.writerow([])
 
-    print(f"Data successfully saved to {out_file}.")
+def save_gim_results_to_csv(data_path, output_path):
+    data = np.load(data_path)
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        ele_n, obs_n, lat_n = data.shape
 
-def gim_npy2csv(file_name: str,out_file):
-    data = np.load(file_name)
-    with open(out_file, mode="w", newline="") as file:
-        writer = csv.writer(file)
-        
-        ele_count, min_obs_count, lat_range_count = data.shape
-        
-        # 遍历第一维（ele）
-        for ele_idx in range(ele_count):
-            ele_header = f"Ele {ele_idx + 1}"  # Ele 标识
-            
-            # 写入表格标题
-            writer.writerow([f"{ele_header} - RMS"])
-            
-            # 写入列标头（lat_range）
-            lat_headers = [f"Lat {j+1}" for j in range(lat_range_count)]
-            writer.writerow(["Min Obs \\ Lat Range"] + lat_headers)
-            
-            # 写入表格数据
-            for min_obs_idx in range(min_obs_count):
-                row_data = [f"Min Obs {min_obs_idx + 1}"]  # 行标头
-                row_data.extend(data[ele_idx, min_obs_idx, :])  # 取出一行的数据
-                writer.writerow(row_data)
-            
-            # 空行分隔不同表格
+        for ele in range(ele_n):
+            writer.writerow([f"Ele {ele + 1} - RMS"])
+            writer.writerow(["Min Obs \\ Lat Range"] + [f"Lat {j+1}" for j in range(lat_n)])
+            for obs in range(obs_n):
+                row = [f"Min Obs {obs + 1}"] + data[ele, obs, :].tolist()
+                writer.writerow(row)
             writer.writerow([])
 
-    print(f"Data successfully saved to {out_file}.")
-
-def ROTI(epoch_segments, vtec_segments):
-    all_rates = []
+def compute_roti(epoch_segments, vtec_segments):
+    rates = []
 
     for epochs, vtecs in zip(epoch_segments, vtec_segments):
         if len(epochs) < 2:
-            continue  # 忽略不满足计算条件的段
-        
-        time_diff = np.diff(epochs) * 1440  # 天 -> 分钟
-        vtec_diff = np.diff(vtecs)
-        rate = vtec_diff / time_diff
+            continue
+        dt_min = np.diff(epochs) * 1440
+        d_vtec = np.diff(vtecs)
+        rates.extend(d_vtec / dt_min)
 
-        all_rates.extend(rate)
+    return np.std(rates) if rates else np.nan
 
-    if len(all_rates) == 0:
-        return np.nan  # 如果没有可用数据
+def find_nearby_doris_indices(lon_d, lat_d, min_obs, lat_start_gap, lat_max_gap, lat_ref, lon_ref):
+    threshold = lat_start_gap
+    max_dist_km = lat_start_gap * 2 * 111
 
-    return np.std(all_rates)
+    while threshold <= lat_max_gap:
+        lat_mask = np.abs(lat_d - lat_ref) <= threshold
+        lon_deg_diff = np.abs((lon_d - lon_ref + 180) % 360 - 180)
+        lon_km = np.cos(np.radians(lat_ref)) * 111.0 * lon_deg_diff
+        combined = lat_mask & (lon_km <= max_dist_km)
 
-def find_doris_indices(doris_lon_time, doris_lat_time, min_obs_count, 
-                       lat_range, max_lat_gap, alt_lat_idx, alt_lon_idx):
-    """
-    根据经纬度逐步扩大搜索窗口，寻找至少 min_obs_count 个满足条件的 DORIS 点。
-    条件为：纬度差 <= lat_threshold，且经度方向距离 <= lon_distance_threshold_km。
-    如果纬度差超过max_lat_gap仍找不到足够点，则返回空列表。
-    """
-    target_lat = alt_lat_idx
-    target_lon = alt_lon_idx
+        if np.count_nonzero(combined) >= min_obs:
+            return np.where(combined)[0].tolist()
 
-    lat_threshold = lat_range
-    lon_distance_threshold_km = lat_threshold * 2 * 111.0  # 初始窗口
-
-    while lat_threshold <= max_lat_gap:
-        lat_diff = np.abs(doris_lat_time - target_lat)
-        lat_mask = lat_diff <= lat_threshold
-
-        lon_diff_deg = np.abs((doris_lon_time - target_lon + 180) % 360 - 180)
-        lon_km_per_deg = np.cos(np.radians(target_lat)) * 111.0
-        lon_diff_km = lon_diff_deg * lon_km_per_deg
-        lon_mask = lon_diff_km <= lon_distance_threshold_km
-
-        combined_mask = lat_mask & lon_mask
-        matching_indices = np.where(combined_mask)[0]
-
-        if len(matching_indices) >= min_obs_count:
-            return matching_indices.tolist()
-
-        lat_threshold += 1.0
-        lon_distance_threshold_km += 2 * 111.0  
+        threshold += 1.0
+        max_dist_km += 2 * 111
 
     return []
 
-def apply_earth_rotation_correction(lon, epoch, ref_epoch):
-    """
-    对经度坐标应用地球自转改正，使其对应于 ref_epoch 时刻。
-    
-    参数:
-        lon (np.ndarray): 原始经度数组（单位：度）
-        epoch (np.ndarray): 对应观测时刻（单位：天，如 Julian Day）
-        ref_epoch (float): 目标参考时刻（单位：天）
+def correct_for_earth_rotation(lons, epochs, ref_epoch):
+    omega = 7.2921159e-5  # rad/s
+    delta_t = (epochs - ref_epoch) * 86400
+    delta_lon_deg = np.degrees(omega * delta_t)
+    corrected = lons + delta_lon_deg
+    return (corrected + 180) % 360 - 180
 
-    返回:
-        np.ndarray: 经过改正并归一化到 [-180, 180] 的经度数组
-    """
-    omega = 7.2921159e-5  # 地球自转角速度 [rad/s]
-    delta_t = (epoch - ref_epoch) * 86400  # 时间差 [秒]
-    delta_lon_deg = np.degrees(omega * delta_t)  # 转换为角度
-
-    lon_corrected = lon + delta_lon_deg
-    lon_normalized = (lon_corrected + 180) % 360 - 180  # 归一化到 [-180, 180]
-
-    return lon_normalized
-
-def average_vector_magnitude(lat0, lon0, lat1, lon1, R=6371 + 450):
-    """
-    计算从参考点 (lat0, lon0) 到一组点之间的向量之和的平均向量的模长。
-    
-    参数：
-    - lat0, lon0: 参考点的纬度和经度（单位：度）
-    - lat1, lon1: 多个点的纬度和经度（单位：度）
-    - R: 球半径，单位为 km，默认为 6371 + 450 km
-    
-    返回：
-    - 平均向量的模长（单位：km）
-    """
-    # 将角度转为弧度
-    lat0_rad = np.radians(lat0)
-    lon0_rad = np.radians(lon0)
-    lat1_rad = np.radians(lat1)
-    lon1_rad = np.radians(lon1)
-    
-    # 将参考点和目标点转为三维直角坐标
+def mean_vector_magnitude(ref_lat, ref_lon, target_lats, target_lons, radius=6371+450):
     def sph2cart(lat, lon, r):
         x = r * np.cos(lat) * np.cos(lon)
         y = r * np.cos(lat) * np.sin(lon)
         z = r * np.sin(lat)
         return np.stack((x, y, z), axis=-1)
+
+    ref_lat, ref_lon = np.radians(ref_lat), np.radians(ref_lon)
+    tgt_lat, tgt_lon = np.radians(target_lats), np.radians(target_lons)
+
+    vec_ref = sph2cart(ref_lat, ref_lon, radius)
+    vec_tgt = sph2cart(tgt_lat, tgt_lon, radius)
     
-    P0 = sph2cart(lat0_rad, lon0_rad, R)         # (3,)
-    Pn = sph2cart(lat1_rad, lon1_rad, R)           # (N, 3)
+    vectors = vec_tgt - vec_ref
+    mean_vec = vectors.mean(axis=0)
     
-    vectors = Pn - P0                             # 从参考点指向其他点的向量 (N, 3)
-    sum_vector = np.sum(vectors, axis=0)          # 向量求和 (3,)
-    avg_vector = sum_vector / len(lon1_rad)         # 平均向量 (3,)
-    
-    magnitude = np.linalg.norm(avg_vector)        # 平均向量的模长
-    return magnitude
+    return np.linalg.norm(mean_vec)
 
 # Main processing
 if __name__ == '__main__':
