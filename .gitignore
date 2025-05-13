@@ -1,0 +1,51 @@
+# 忽略你指定的子目录
+DORISVTEC/
+DORISInput/
+DORISObsStorage/
+Visulization/
+AltimetryData/
+
+# 忽略常见的大文件、文献、数据格式
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+*.zip
+*.tar
+*.rar
+*.7z
+
+# 忽略科学数据文件
+*.csv
+*.mat
+*.h5
+*.npy
+*.npz
+*.jsonl
+
+# 忽略绘图输出和中间文件
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.eps
+*.log
+*.aux
+*.out
+*.toc
+
+# 忽略 Python 编译文件和缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 忽略 Jupyter Notebook 的检查点
+.ipynb_checkpoints/
+
+# 忽略 VS Code 设置（如不共享设置）
+.vscode/
+
+# 忽略临时文件
+*.swp
+*.tmp
+~$*
