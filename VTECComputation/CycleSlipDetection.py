@@ -84,7 +84,6 @@ def detect_passes(station_obs: list[DORISObs], satellite_clock_offsets: list[flo
     geom_factor = 5 / d_lambda1 - 1 / d_lambda2
     time_step = 10  # seconds
     
-
     for obs_pass in grouped_obs:
         elevations = np.array([obs.elevation for obs in obs_pass])
         valid_indices = elevations > 10

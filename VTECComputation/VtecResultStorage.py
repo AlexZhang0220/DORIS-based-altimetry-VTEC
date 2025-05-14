@@ -135,13 +135,13 @@ def elevation_noise(station_obs: list[DORISObs], settings: Thresholds) -> list[P
     return elevation, dd_noise
 
 if __name__ == '__main__':
-        # COMPARISON OF SAME STATION AT QUIET AND ACTIVE CASES TO SEE if there is any DIFFERENCES
+
     start_time = time.time()
 
     year = 2024
     month = 5
     day = 8
-    proc_days = 10
+    proc_days = 30
     max_dion_gap = 0.015
     min_obs_count = 30
     max_obs_epoch_gap = 9
