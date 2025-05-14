@@ -178,7 +178,7 @@ if __name__ == '__main__':
         # Vtec Std of the window Number of obs in the window
         Passh5 = f'./DORISVTEC/{year}/DOY{doy:03d}.h5'
         with h5py.File(Passh5, 'w') as f:
-            setting_group = f.require_group(f'y{year}/{doy:03d}/count{min_obs_count}')
+            setting_group = f.require_group(f'y{year}/{doy:03d}')
             
             for index, arc in enumerate(pass_list):
                 group_name = f'pass{index}-{arc.station_code}'
