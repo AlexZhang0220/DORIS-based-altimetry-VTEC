@@ -1,8 +1,5 @@
-# from rinex reading results to VTEC results, 
-# including passdetection (cycle slip detection) and VTEC leveling
 from ObjectClasses import DORISObs, Thresholds
 from ReceiverOffset import compute_sat_clock_corrections
-# from PassDetection import detect_passes
 from CycleSlipDetection import detect_passes
 from ObjectClasses import PassObj
 from tools import GIMInpo

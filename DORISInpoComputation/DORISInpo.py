@@ -171,48 +171,36 @@ def mean_vector_magnitude(ref_lat, ref_lon, target_lats, target_lons, radius=637
 
 # Main processing
 if __name__ == '__main__':
-    
     start_time = time.time()
-    # inpo_results_plot(2024,5,8,30,['obs-30','ele-10','lat-8'])    
-    # Settings
-    start_year = 2024
-    start_month = 5
-    start_day = 13
-    process_days = 5
-    start_epoch = datetime(start_year, start_month, start_day)
-    start_doy = start_epoch.timetuple().tm_yday
 
-    weighting_method = 'Window'
-    ele_mask_list = [10]
-    min_obs_count_list = [30]
-    lat_range_list = [1]
-    lon_range_list = [lat * 2 for lat in lat_range_list]
-    max_lat_gap = 10
-    roti_threshold = 1
+    start_date = datetime(2024, 5, 13)
+    num_days = 5
+    params = {
+        'ele_mask': 10,
+        'min_obs': 30,
+        'lat_win': 1,
+        'lon_win': 2,
+        'max_lat_gap': 10,
+        'roti_threshold': 1
+    }
 
-    results_shape = (len(ele_mask_list), len(min_obs_count_list), len(lon_range_list), 4)
-    division_str = 'lat-'+'-'.join(map(str, lat_range_list))
+    results = {
+        'doris_rms': [],
+        'doris_std': [],
+        'doris_obs': [],
+        'doris_rate': [],
+        'gim_rms': [],
+        'avg_doris_dist': []
+    }
 
-    ele_str = 'ele-'+'-'.join(map(str, ele_mask_list))
-    min_obs_str = 'obs-'+'-'.join(map(str, min_obs_count_list))
+    for day_offset in range(num_days):
+        date = start_date + timedelta(days=day_offset)
+        year, month, day = date.year, date.month, date.day
+        doy = date.timetuple().tm_yday
 
-    # Initialize results arrays
-    doris_results = np.zeros(results_shape)
-    gim_rms_results = np.zeros(results_shape[:-1])
-    doris_ipp_results = np.zeros(results_shape[:-1])
-
-    # Loop over processing interval
-    for day_idx, day_offset in enumerate(range(process_days)):
-
-        doris_alt_vtec_mean = []
-        process_date = start_epoch + timedelta(days=day_offset)
-        year, month, day = process_date.year, process_date.month, process_date.day
-        doy = process_date.timetuple().tm_yday
-        
-        # Load altimetry, DORIS and GIM data 
         alt_lon, alt_lat, alt_epoch, alt_vtec = load_altimetry_data(month, day)
         doris_lon, doris_lat, doris_epoch, doris_vtec, doris_ele = load_doris_data(year, doy)
-        
+
         ion_file = (
             f"./DORISInput/IGSGIM/{year}/igsg{doy:03d}0.{str(year)[-2:]}i"
             if year <= 2022 else
@@ -220,139 +208,128 @@ if __name__ == '__main__':
         )
         gim_vtec = read_ionFile(ion_file) * 0.1
         gim_vtec = gim_vtec[:, ::-1, :]
-        gim_vtec_alt_ipp = interpolate_gim_vtec(gim_vtec, alt_epoch, alt_lat, alt_lon)
+        gim_vtec_interp = interpolate_gim_vtec(gim_vtec, alt_epoch, alt_lat, alt_lon)
 
-        for ele_mask_idx, ele_mask in enumerate(ele_mask_list):
-            valid_indices = np.where(doris_ele > ele_mask)
-            # one needs to make sure that the ele mask list is increasing
-            doris_lon, doris_lat, doris_epoch, doris_vtec, doris_ele = (
-                arr[valid_indices] for arr in (doris_lon, doris_lat, doris_epoch, doris_vtec, doris_ele)
-            )        
-            for min_obs_idx, min_obs_count in enumerate(min_obs_count_list):            
-                # Process results based on strategy
-             
-                for lat_range_idx, lat_range in enumerate(lat_range_list):
-                    vtec_estimates, vtec_stds, obs_counts, obs_dists = [], [], [], []
-                    gim_scaled_list, alt_vtec_list = [], []
-                    ipp_lats, ipp_lons, roti_values = [], [], []
-                    avg_vec_dis = []
-                    for epoch_idx, epoch_time in enumerate(alt_epoch):
-                        lat = alt_lat[epoch_idx]
-                        lon = alt_lon[epoch_idx]
-                        time_diff_sec = np.abs(doris_epoch - epoch_time) * 86400
-                        time_mask = time_diff_sec < 400
-                        if np.count_nonzero(time_mask) < min_obs_count: continue       
-                        d_lon, d_lat, d_epoch, d_vtec, d_ele = (
-                            arr[time_mask] for arr in (doris_lon, doris_lat, doris_epoch, doris_vtec, doris_ele))   
-                        
-                        d_lon = apply_earth_rotation_correction(d_lon, d_epoch, epoch_time)
+        # 按 elevation mask 过滤 DORIS 观测
+        mask = doris_ele > params['ele_mask']
+        doris_lon, doris_lat, doris_epoch, doris_vtec, doris_ele = (
+            arr[mask] for arr in (doris_lon, doris_lat, doris_epoch, doris_vtec, doris_ele)
+        )
 
-                        # # write a func for all these
-                        time_mask_roti = time_diff_sec < 250
-                        d_epoch_roti = doris_epoch[time_mask_roti]
-                        d_vtec_roti = doris_vtec[time_mask_roti]
-                        diff_idx = np.diff(np.where(time_mask_roti)[0])
-                        seg_breaks = np.where(diff_idx != 1)[0] + 1
-                        split_points = np.concatenate(([0], seg_breaks, [len(np.where(time_mask_roti)[0])]))
-                        epoch_segs = [d_epoch_roti[s:e] for s, e in zip(split_points[:-1], split_points[1:])]
-                        vtec_segs = [d_vtec_roti[s:e] for s, e in zip(split_points[:-1], split_points[1:])]
-                        roti = ROTI(epoch_segs, vtec_segs)
-                        
-                        if roti < roti_threshold:                             
-                            if (indices := find_doris_indices(d_lon, d_lat, min_obs_count, 10, max_lat_gap, lat, lon)):
-                                sel_lon = d_lon[indices]
-                                sel_lat = d_lat[indices]
-                                sel_vtec = d_vtec[indices]
-                                avg_vec_dis.append(average_vector_magnitude(lat, lon, sel_lat, sel_lon))
-                                dists = np.array(haversine_vec(lat, lon, sel_lat, sel_lon))
-                                dists[dists == 0] = 1e-12
-                                weights = 1 / dists
-                                weights /= weights.sum()
-                                weighted_vtec = np.sum(weights * sel_vtec)
-                                vtec_estimates.append(weighted_vtec)
-                                vtec_stds.append(np.std(sel_vtec))
-                                obs_counts.append(len(sel_vtec))
-                                obs_dists.append(np.mean(dists))
-                                gim_scaled_list.append(gim_vtec_alt_ipp[epoch_idx] * 0.925)
-                                alt_vtec_list.append(alt_vtec[epoch_idx])
-                                ipp_lats.append(lat)
-                                ipp_lons.append(lon)
-                                roti_values.append(roti)   
+        vtec_estimates, alt_vtec_filtered, avg_vec_dis = [], [], []
 
-                        elif roti >= roti_threshold: 
-                            continue
-                            if (indices := find_doris_indices(d_lon, d_lat, min_obs_count, 6, 6, lat, lon)):
-                                sel_lon = d_lon[indices]
-                                sel_lat = d_lat[indices]
-                                sel_vtec = d_vtec[indices]
-                                avg_vec_dis.append(average_vector_magnitude(lat, lon, sel_lat, sel_lon))
-                                dists = np.array(haversine_vec(lat, lon, sel_lat, sel_lon))
-                                dists[dists == 0] = 1e-12
-                                weights = 1 / dists
-                                weights /= weights.sum()
-                                weighted_vtec = np.sum(weights * sel_vtec)
-                                
-                                vtec_estimates.append(weighted_vtec)
-                                vtec_stds.append(np.std(sel_vtec))
-                                obs_counts.append(len(sel_vtec))
-                                obs_dists.append(np.mean(dists))
-                                gim_scaled_list.append(gim_vtec_alt_ipp[epoch_idx] * 0.925)
-                                alt_vtec_list.append(alt_vtec[epoch_idx])
-                                ipp_lats.append(lat)
-                                ipp_lons.append(lon)
-                                roti_values.append(roti)
+        for i, epoch_time in enumerate(alt_epoch):
+            lat, lon = alt_lat[i], alt_lon[i]
+            time_diff_sec = np.abs(doris_epoch - epoch_time) * 86400
+            time_mask = time_diff_sec < 400
 
-                            else:
-                                
-                                # lat_diff = np.abs(d_lat - lat)
-                                # lat_mask = lat_diff <= 8
+            if np.count_nonzero(time_mask) < params['min_obs']:
+                continue
 
-                                # lon_diff_deg = np.abs((d_lon - lon + 180) % 360 - 180)
-                                # lon_km_per_deg = np.cos(np.radians(lat)) * 111.0
-                                # lon_diff_km = lon_diff_deg * lon_km_per_deg
-                                # lon_mask = lon_diff_km <= 8 * 2 * 111
+            d_lon, d_lat, d_epoch, d_vtec = (
+                arr[time_mask] for arr in (doris_lon, doris_lat, doris_epoch, doris_vtec)
+            )
+            d_lon = correct_for_earth_rotation(d_lon, d_epoch, epoch_time)
 
-                                # combined_mask = lat_mask & lon_mask
-                                # matching_indices = np.where(combined_mask)[0]
+            # 计算 ROTI
+            roti_mask = time_diff_sec < 250
+            roti_epochs = doris_epoch[roti_mask]
+            roti_vtec = doris_vtec[roti_mask]
+            roti_val = compute_roti(roti_epochs, roti_vtec)
 
-                                # if len(matching_indices) < min_obs_count:
-                                #     continue
+            
+            if roti_val < params['roti_threshold']:                             
+                if (indices := find_nearby_doris_indices(d_lon, d_lat, params['min_obs'], params['lon_win'], params['max_lat_gap'], lat, lon)):
+                    sel_lon = d_lon[indices]
+                    sel_lat = d_lat[indices]
+                    sel_vtec = d_vtec[indices]
+                    avg_vec_dis.append(mean_vector_magnitude(lat, lon, sel_lat, sel_lon))
+                    dists = np.array(haversine_vec(lat, lon, sel_lat, sel_lon))
+                    weighted_vtec = inverse_distance_weighting(dists, sel_vtec)
+                    vtec_estimates.append(weighted_vtec)
+                    vtec_stds.append(np.std(sel_vtec))
+                    obs_counts.append(len(sel_vtec))
+                    obs_dists.append(np.mean(dists))
+                    gim_scaled_list.append(gim_vtec_alt_ipp[epoch_idx] * 0.925)
+                    alt_vtec_list.append(alt_vtec[epoch_idx])
+                    ipp_lats.append(lat)
+                    ipp_lons.append(lon)
+                    roti_values.append(roti)   
 
-                                if (indices := find_doris_indices(d_lon, d_lat, min_obs_count, 10, 10, lat, lon)):
-                                    sel_lon = d_lon[indices]
-                                    sel_lat = d_lat[indices]
-                                    sel_vtec = d_vtec[indices]
-                                    avg_vec_dis.append(average_vector_magnitude(lat, lon, sel_lat, sel_lon))
-                                    dists = np.array(haversine_vec(lat, lon, sel_lat, sel_lon))
-                                    dists[dists == 0] = 1e-12
-                                    weights = 1 / dists
-                                    weights /= weights.sum()
-                                    weighted_vtec = np.sum(weights * sel_vtec)
-                                    
-                                    vtec_estimates.append(weighted_vtec)
-                                    vtec_stds.append(np.std(sel_vtec))
-                                    obs_counts.append(len(sel_vtec))
-                                    obs_dists.append(np.mean(dists))
-                                    gim_scaled_list.append(gim_vtec_alt_ipp[epoch_idx] * 0.925)
-                                    alt_vtec_list.append(alt_vtec[epoch_idx])
-                                    ipp_lats.append(lat)
-                                    ipp_lons.append(lon)
-                                    roti_values.append(roti)
-
-                    vtec_estimates = np.array(vtec_estimates)
-                    vtec_stds = np.array(vtec_stds)
-                    obs_counts = np.array(obs_counts)
-                    obs_dists = np.array(obs_dists)
-                    gim_scaled_list = np.array(gim_scaled_list)
-                    alt_vtec_list = np.array(alt_vtec_list)
+            elif roti >= roti_threshold: 
+                continue
+                if (indices := find_doris_indices(d_lon, d_lat, min_obs_count, 6, 6, lat, lon)):
+                    sel_lon = d_lon[indices]
+                    sel_lat = d_lat[indices]
+                    sel_vtec = d_vtec[indices]
+                    avg_vec_dis.append(average_vector_magnitude(lat, lon, sel_lat, sel_lon))
+                    dists = np.array(haversine_vec(lat, lon, sel_lat, sel_lon))
+                    dists[dists == 0] = 1e-12
+                    weights = 1 / dists
+                    weights /= weights.sum()
+                    weighted_vtec = np.sum(weights * sel_vtec)
                     
-                    doris_results[ele_mask_idx, min_obs_idx, lat_range_idx] = [
-                        np.sqrt(np.mean((vtec_estimates - alt_vtec_list) ** 2)),
-                        np.mean(vtec_stds),
-                        np.mean(obs_counts),
-                        len(vtec_estimates) / len(gim_vtec_alt_ipp)
-                    ]
-                    gim_rms_results[ele_mask_idx, min_obs_idx, lat_range_idx] = np.sqrt(np.mean(np.square(gim_scaled_list - alt_vtec_list)))
-                    print(doris_results[ele_mask_idx, min_obs_idx, lat_range_idx], np.mean(obs_dists), gim_rms_results[ele_mask_idx, min_obs_idx, lat_range_idx], np.mean(avg_vec_dis))                                      
+                    vtec_estimates.append(weighted_vtec)
+                    vtec_stds.append(np.std(sel_vtec))
+                    obs_counts.append(len(sel_vtec))
+                    obs_dists.append(np.mean(dists))
+                    gim_scaled_list.append(gim_vtec_alt_ipp[epoch_idx] * 0.925)
+                    alt_vtec_list.append(alt_vtec[epoch_idx])
+                    ipp_lats.append(lat)
+                    ipp_lons.append(lon)
+                    roti_values.append(roti)
+
+                else:
+                    
+                    # lat_diff = np.abs(d_lat - lat)
+                    # lat_mask = lat_diff <= 8
+
+                    # lon_diff_deg = np.abs((d_lon - lon + 180) % 360 - 180)
+                    # lon_km_per_deg = np.cos(np.radians(lat)) * 111.0
+                    # lon_diff_km = lon_diff_deg * lon_km_per_deg
+                    # lon_mask = lon_diff_km <= 8 * 2 * 111
+
+                    # combined_mask = lat_mask & lon_mask
+                    # matching_indices = np.where(combined_mask)[0]
+
+                    # if len(matching_indices) < min_obs_count:
+                    #     continue
+
+                    if (indices := find_doris_indices(d_lon, d_lat, min_obs_count, 10, 10, lat, lon)):
+                        sel_lon = d_lon[indices]
+                        sel_lat = d_lat[indices]
+                        sel_vtec = d_vtec[indices]
+                        avg_vec_dis.append(average_vector_magnitude(lat, lon, sel_lat, sel_lon))
+                        dists = np.array(haversine_vec(lat, lon, sel_lat, sel_lon))
+                        dists[dists == 0] = 1e-12
+                        weights = 1 / dists
+                        weights /= weights.sum()
+                        weighted_vtec = np.sum(weights * sel_vtec)
+                        
+                        vtec_estimates.append(weighted_vtec)
+                        vtec_stds.append(np.std(sel_vtec))
+                        obs_counts.append(len(sel_vtec))
+                        obs_dists.append(np.mean(dists))
+                        gim_scaled_list.append(gim_vtec_alt_ipp[epoch_idx] * 0.925)
+                        alt_vtec_list.append(alt_vtec[epoch_idx])
+                        ipp_lats.append(lat)
+                        ipp_lons.append(lon)
+                        roti_values.append(roti)
+
+        vtec_estimates = np.array(vtec_estimates)
+        vtec_stds = np.array(vtec_stds)
+        obs_counts = np.array(obs_counts)
+        obs_dists = np.array(obs_dists)
+        gim_scaled_list = np.array(gim_scaled_list)
+        alt_vtec_list = np.array(alt_vtec_list)
+        
+        doris_results[ele_mask_idx, min_obs_idx, lat_range_idx] = [
+            np.sqrt(np.mean((vtec_estimates - alt_vtec_list) ** 2)),
+            np.mean(vtec_stds),
+            np.mean(obs_counts),
+            len(vtec_estimates) / len(gim_vtec_alt_ipp)
+        ]
+        gim_rms_results[ele_mask_idx, min_obs_idx, lat_range_idx] = np.sqrt(np.mean(np.square(gim_scaled_list - alt_vtec_list)))
+        print(doris_results[ele_mask_idx, min_obs_idx, lat_range_idx], np.mean(obs_dists), gim_rms_results[ele_mask_idx, min_obs_idx, lat_range_idx], np.mean(avg_vec_dis))                                      
             
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
