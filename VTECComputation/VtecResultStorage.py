@@ -1,8 +1,5 @@
-# from rinex reading results to VTEC results, 
-# including passdetection (cycle slip detection) and VTEC leveling
 from ObjectClasses import DORISObs, Thresholds
 from ReceiverOffset import compute_sat_clock_corrections
-# from PassDetection import detect_passes
 from CycleSlipDetection import detect_passes
 from ObjectClasses import PassObj
 from tools import GIMInpo
@@ -138,13 +135,13 @@ def elevation_noise(station_obs: list[DORISObs], settings: Thresholds) -> list[P
     return elevation, dd_noise
 
 if __name__ == '__main__':
-        # COMPARISON OF SAME STATION AT QUIET AND ACTIVE CASES TO SEE if there is any DIFFERENCES
+
     start_time = time.time()
 
     year = 2024
     month = 5
     day = 8
-    proc_days = 10
+    proc_days = 30
     max_dion_gap = 0.015
     min_obs_count = 30
     max_obs_epoch_gap = 9
@@ -181,7 +178,7 @@ if __name__ == '__main__':
         # Vtec Std of the window Number of obs in the window
         Passh5 = f'./DORISVTEC/{year}/DOY{doy:03d}.h5'
         with h5py.File(Passh5, 'w') as f:
-            setting_group = f.require_group(f'y{year}/{doy:03d}/count{min_obs_count}')
+            setting_group = f.require_group(f'y{year}/{doy:03d}')
             
             for index, arc in enumerate(pass_list):
                 group_name = f'pass{index}-{arc.station_code}'

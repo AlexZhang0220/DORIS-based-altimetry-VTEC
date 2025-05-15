@@ -27,16 +27,14 @@ def find_sp3_files(folder_path, year, doy):
 
     return matching_files
 
-
 if __name__ == '__main__':
 
     start_time = time.time()
 
     year = 2024
     month = 5
-    day = 8
-    proc_days = 10
-
+    day = 31
+    proc_days = 9
     start_dt = Timestamp(year, month, day)
     end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days)
 

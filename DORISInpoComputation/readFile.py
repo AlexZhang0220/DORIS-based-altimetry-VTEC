@@ -629,7 +629,6 @@ def read_sp3File(sp3file):
     f.close() # close the file
     # ------------------------------------------------------------------
     end = time.time()
-    print('{}'.format(sp3file), 'file is read in', '{0:.2f}'.format(end-start), 'seconds')
     return position
 
 #-------------------------------------------------------------------------
@@ -741,7 +740,7 @@ def read_ionFile(IonFile):
         #---------------------------------------------------------------------------------------
     f.close() # close the file
     finish = time.time()
-    # print("Ionosphere file ", IonFile," is read in", "{0:.2f}".format(finish-start), "seconds.")
+
     return tecuList
 
 def read_ionRMSFile(IonFile):

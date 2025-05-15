@@ -3,7 +3,7 @@ import constant
 from typing import List, Dict, Tuple
 
 import math
-
+import constant
 from pyproj import Transformer
 from astropy.time import Time
 from scipy.interpolate import RegularGridInterpolator
@@ -120,22 +120,8 @@ def haversine_vec(lat1, lon1, lat2_array, lon2_array, R=6371+506.7):
     return 2 * R * np.arcsin(np.sqrt(a))
 
 def compute_lat_lon_distances(alt_lat_idx, alt_lon_idx, doris_lat_inpo, doris_lon_inpo):
-    """
-    计算 alt_lat_idx/alt_lon_idx 表示的点与 doris_lat_inpo/doris_lon_inpo 向量表示的点之间
-    沿纬线和经线方向的距离。
 
-    参数：
-        alt_lat_idx: 标量，参考点的纬度（单位：度）
-        alt_lon_idx: 标量，参考点的经度（单位：度）
-        doris_lat_inpo: 向量，DORIS 点的纬度（单位：度）
-        doris_lon_inpo: 向量，DORIS 点的经度（单位：度）
-
-    返回：
-        dist_lat: 沿纬线方向的距离向量（单位：km）
-        dist_lon: 沿经线方向的距离向量（单位：km）
-    """
-    # 地球平均半径（单位：米）
-    R = 6371000  
+    R = constant.AE84 
 
     # 将角度转换为弧度
     alt_lat_rad = np.radians(alt_lat_idx)
