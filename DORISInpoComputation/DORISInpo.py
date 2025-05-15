@@ -113,13 +113,24 @@ def save_gim_results_to_csv(data_path, output_path):
                 writer.writerow(row)
             writer.writerow([])
 
-def compute_roti(epoch_segments, vtec_segments):
-    rates = []
+def compute_roti(doris_epoch, doris_vtec, time_diff_sec, time_gap=250):
 
-    for epochs, vtecs in zip(epoch_segments, vtec_segments):
+    time_mask = time_diff_sec < time_gap
+    d_epoch = doris_epoch[time_mask]
+    d_vtec = doris_vtec[time_mask]
+
+    diff_idx = np.diff(np.where(time_mask)[0])
+    seg_breaks = np.where(diff_idx != 1)[0] + 1
+    split_points = np.concatenate(([0], seg_breaks, [len(d_epoch)]))
+
+    epoch_segs = [d_epoch[s:e] for s, e in zip(split_points[:-1], split_points[1:])]
+    vtec_segs = [d_vtec[s:e] for s, e in zip(split_points[:-1], split_points[1:])]
+
+    rates = []
+    for epochs, vtecs in zip(epoch_segs, vtec_segs):
         if len(epochs) < 2:
             continue
-        dt_min = np.diff(epochs) * 1440
+        dt_min = np.diff(epochs) * 1440  # convert days to minutes
         d_vtec = np.diff(vtecs)
         rates.extend(d_vtec / dt_min)
 
@@ -173,13 +184,13 @@ if __name__ == '__main__':
     start_time = time.time()
 
     start_date = datetime(2024, 5, 8)
-    num_days = 10
+    num_days = 30
     params = {
         'ele_mask': 10,
         'min_obs': 30,
         'lat_win': 1,
         'lon_win': 2,
-        'max_lat_gap': 10,
+        'max_lat_gap': 7,
         'roti_threshold': 1
     }
 
@@ -223,10 +234,7 @@ if __name__ == '__main__':
             d_lon = correct_for_earth_rotation(d_lon, d_epoch, epoch_time)
 
             # computation of roti: a smaller time gap
-            roti_mask = time_diff_sec < 250
-            roti_epochs = doris_epoch[roti_mask]
-            roti_vtec = doris_vtec[roti_mask]
-            roti_val = compute_roti(roti_epochs, roti_vtec)
+            roti_val = compute_roti(doris_epoch, doris_vtec, time_diff_sec, time_gap=250)
            
             # small roti means small iono fluctuation and flexible growing window
             if roti_val < params['roti_threshold']:                             
