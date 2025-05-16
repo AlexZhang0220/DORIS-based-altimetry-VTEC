@@ -4,14 +4,15 @@ from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
 from tools import get_elevation, get_map_value, Raypoint
 from pandas import Timestamp, Timedelta
-from multiprocessing import Pool, cpu_count
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import mmap
-
+import pandas as pd
+import xarray as xr
 
 class DORISStorage:
     def __init__(self) -> None:
-        self.storage: List[List[DORISObs]] = [] # [station][epoch] = DORISObs
+        self.storage = pd.DataFrame() # [station][epoch] = DORISObs
         self.stations: List[DORISBeacon] = []
 
     def _parse_header(self, file: str) -> List[str]:
@@ -26,45 +27,7 @@ class DORISStorage:
             print(f"Unable to read the file: {file}")
         return header
 
-    def _parse_lines_chunk(self, chunk: list[str], obs_type: list[str], PRN: str, stations: list[DORISBeacon],
-                           orbit_data: OrbitStorage, station_data: StationStorage, settings: Thresholds) -> list[DORISObs]:
-        """
-        Processes a chunk of lines, extracting observation values and performing calculations.
-        """
-        results = [[] for _ in range(len(stations))]
-        for i, line in enumerate(chunk):
-            if line[0] == ">":  # Observation epoch header
-                y, m, d, h, mi, s = int(line[2:6]), int(line[7:9]), int(line[10:12]), int(line[13:15]), int(line[16:18]), int(line[18:21])
-                ms = int(line[22:28])
-                ns = int(line[28:31])  # Nanoseconds
-                obs_epoch = Timestamp(year=y, month=m, day=d, hour=h, minute=mi, second=s, microsecond=ms, nanosecond=ns) ## check??
-                receiver_clock_offset = float(line[44:56])
-                obs_epoch_offset = obs_epoch + Timedelta(receiver_clock_offset, unit='s') ## ?? check
-
-            elif line.strip() and line[0] == 'D':  # Observation data
-                ID = int(line[1:3])
-                station = stations[ID - 1]
-                obs_values = np.array([float(line[j:j + 14].strip()) for j in range(3, 83, 16)])
-                if line[50] == '7': # < 5 elevation, as the seventh channel of DGXX receiver is used
-                    continue
-                obs = DORISObs(station.station_code, ID, station.shift, receiver_clock_offset, obs_values, obs_epoch, obs_type, PRN)
-                obs.pos_sat_cele = orbit_data.get_pos_cele_lagr_inter_fast(obs_epoch_offset, num_inter_point=7)
-                obs.pos_sta_cele = station_data.get_pos_cele(obs.station_code, obs_epoch)
-                obs.ant_type = station_data.get_ant_type(obs.station_code, obs_epoch)
-                if len(obs.pos_sta_cele) == 0 or len(obs.pos_sat_cele) == 0:
-                    continue
-                obs.elevation = get_elevation(obs.pos_sat_cele, obs.pos_sta_cele)
-                if obs.elevation < settings.ele_cut_off:
-                    continue
-                Ion_height = 506700
-                obs.ipp_lon, obs.ipp_lat = Raypoint(obs.pos_sat_cele, obs.pos_sta_cele, Ion_height)
-                obs.map_value = get_map_value(obs.elevation)
-                obs.geom_corr()
-                results[ID-1].append(obs)
-        return results
-
-    def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage,
-                       settings: Thresholds):
+    def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage):
         header = self._parse_header(file)
         obs_type = self._extract_obs_type_count(header)
         self.stations = self._extract_stations_from_header(header)
@@ -77,28 +40,14 @@ class DORISStorage:
                 mmapped_file.seek(mmapped_file.find(b"END OF HEADER") + len("END OF HEADER\n"))
                 lines = mmapped_file.read().decode('utf-8').splitlines()
                 chunks = _split_lines_by_marker(lines, 1000)
-        # Use multiprocessing to process chunks
-        # chunk_obs = [self._parse_lines_chunk(chunk, obs_type, PRN, self.stations, orbit_data, station_data, settings) for chunk in chunks
-        #     ]
-        with Pool(cpu_count()) as pool:
-            chunk_obs = pool.starmap(self._parse_lines_chunk, [
-                (chunk, obs_type, PRN, self.stations, orbit_data, station_data, settings) for chunk in chunks
-            ])
 
-        # Combine results
-        self.storage = [
-            [value for chunk_idx in range(len(chunk_obs)) for value in chunk_obs[chunk_idx][station_idx]]
-            for station_idx in range(len(chunk_obs[0]))
-        ]
-        ## The code above equals the code below
-        # results_reduced = []
-        # for station_idx in range(len(chunk_obs[0])):  # each station
-        #     station_data = []
-        #     for chunk_idx in range(len(chunk_obs)):   # each chunk
-        #         station_data += chunk_obs[chunk_idx][station_idx]
-        #     results_reduced.append(station_data)
-        # self.storage = results_reduced
+        df_obs = parse_lines_in_parallel(chunks, obs_type, PRN, self.stations) # all observation in the form of data frame
 
+        df_obs = interpolate_satellite_positions_xarray(df_obs, orbit_data.sat_dataset, PRN) # include satellite position
+
+        df_obs = merge_station_position(df_obs, station_data.storage)
+
+        self.storage = df_obs
 
     def _extract_stations_from_header(self, header: List[str]) -> List[DORISBeacon]:
         stations = []
@@ -161,7 +110,7 @@ class DORISStorage:
             PRN
         )
 
-def _split_lines_by_marker(lines: List[str], chunk_size: int = 1000, marker: str = ">") -> List[List[str]]:
+def _split_lines_by_marker(lines: list[str], chunk_size: int = 1000, marker: str = ">") -> list[list[str]]:
         chunks = []
         start = 0
 
@@ -177,3 +126,104 @@ def _split_lines_by_marker(lines: List[str], chunk_size: int = 1000, marker: str
 
         return chunks
 
+def _parse_lines_chunk_df(chunk: list[str], obs_type: list[str], PRN: str, stations: list[DORISBeacon]) -> pd.DataFrame:
+    records = []
+    current_epoch = None
+    receiver_clock_offset = None
+
+    for line in chunk:
+        if line[0:4] == "":
+            continue
+        elif line.startswith(">"):
+            current_epoch = pd.to_datetime(line[2:31], format="%Y %m %d %H %M %S.%f")
+            receiver_clock_offset = float(line[44:56])
+        elif line.startswith("D"):
+            ID = int(line[1:3]) #station_id
+            if line[50] == '7':  # elevation < 5° -> skip
+                continue
+            obs_fields = [float(line[j:j + 14].strip()) for j in range(3, 83, 16)]
+            record = {
+                "obs_epoch": current_epoch,
+                "receiver_clock_offset": receiver_clock_offset,
+                "station_id": ID,
+                "station_code": stations[ID - 1].station_code,
+                "station_shift": stations[ID - 1].freq_shift,
+                "PRN": PRN,
+                "L1": obs_fields[obs_type.index("L1")] if "L1" in obs_type else np.nan,
+                "L2": obs_fields[obs_type.index("L2")] if "L2" in obs_type else np.nan,
+                "C1": obs_fields[obs_type.index("C1")] * 10 if "C1" in obs_type else np.nan,
+                "C2": obs_fields[obs_type.index("C2")] * 10 if "C2" in obs_type else np.nan,
+            }
+            records.append(record)
+
+    return pd.DataFrame.from_records(records)
+
+def parse_worker(lines_chunk, obs_type: list[str], PRN: str, stations: list[DORISBeacon]):
+    return _parse_lines_chunk_df(lines_chunk, obs_type, PRN, stations)
+
+def parse_lines_in_parallel(all_lines_chunks, obs_type: list[str], PRN: str, stations: list[DORISBeacon], max_workers=1):
+
+    dfs = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(parse_worker, chunk, obs_type, PRN, stations) for chunk in all_lines_chunks]
+
+        for future in as_completed(futures):
+            try:
+                dfs.append(future.result())
+            except Exception as e:
+                print("Rinexreading Error:", e)
+
+    df_all = pd.concat(dfs, ignore_index=True)
+    return df_all
+
+def interpolate_satellite_positions_xarray(df_obs: pd.DataFrame, sat_dataset: xr.Dataset, prn: str) -> pd.DataFrame:
+
+    sat_data = sat_dataset.sel(sv=prn)
+    obs_time = pd.to_datetime(df_obs["obs_epoch"].values)
+    unique_times = np.unique(obs_time)
+
+    interp_result = sat_data.interp(time=unique_times)
+    interp_df = pd.DataFrame({
+        "obs_epoch": unique_times,
+        "sat_x": interp_result["position"].sel(ECEF="x").values * 1000,
+        "sat_y": interp_result["position"].sel(ECEF="y").values * 1000,
+        "sat_z": interp_result["position"].sel(ECEF="z").values * 1000,
+    })
+    df_obs = df_obs.merge(interp_df, on="obs_epoch", how="left")
+
+    return df_obs
+
+def merge_station_position(df_obs, stations: StationStorage):
+
+    def get_station_data(stations):
+        station_records = []
+        for i, sta in enumerate(stations):
+            for j, epoch in enumerate(sta.soln_epochlist):
+                if j < len(sta.soln_coor):
+                    station_records.append({
+                        "station_code": sta,
+                        "soln_epoch": pd.Timestamp(epoch),
+                        "sta_x": sta.soln_coor[j][0],
+                        "sta_y": sta.soln_coor[j][1],
+                        "sta_z": sta.soln_coor[j][2]
+                    })
+        return pd.DataFrame(station_records)
+
+    df_station_records = get_station_data(stations)
+
+    df_station_records = df_station_records.sort_values(by=["station_code", "soln_epoch"])
+    df_obs = df_obs.sort_values(by=["station_code", "obs_epoch"])
+
+    df_obs_with_sta = pd.merge_asof(
+        df_obs,
+        df_station_records,
+        by="station_code",
+        left_on="obs_epoch",
+        right_on="soln_epoch",
+        direction="backward"
+    )
+
+    # 过滤掉没有匹配的测站坐标（obs_epoch 小于最早 soln_epoch）
+    df_obs = df_obs[df_obs["soln_epoch"].notna()].copy()
+
+    return df_obs

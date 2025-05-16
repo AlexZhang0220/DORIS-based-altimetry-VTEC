@@ -7,13 +7,13 @@ import constant
 import copy
 
 class DORISBeacon: 
-    def __init__(self, ID:int, station_code:str, name:str, domes:str, type:str, shift:int) -> None:
+    def __init__(self, ID:int, station_code:str, name:str, domes:str, type:str, freq_shift:int) -> None:
         self.ID = ID
         self.station_code = station_code
         self.name = name
         self.domes = domes
         self.type = type
-        self.shift = shift # station frequency shift factor
+        self.freq_shift = freq_shift # station frequency shift factor
 
         self.time_ref_bit = False
         self.time_bias = 0.0 # time beacon reference vs. TAI reference time [1e-6 s]
@@ -22,11 +22,11 @@ class DORISBeacon:
 class DORISObs:
 
 
-    def __init__(self, station_code: str, station_id: int, station_shift:int, receiver_clock_offset: float,
+    def __init__(self, station_code: str, station_id: int, freq_shift:int, receiver_clock_offset: float,
                  obs_value: list[float], obs_epoch: Timestamp, obs_type: list[str], PRN):
         self.station_code = station_code
         self.station_id = station_id
-        self.station_shift = station_shift # station frequency shift factor
+        self.freq_shift = freq_shift # station frequency shift factor
         self.receiver_clock_offset = receiver_clock_offset
         self.obs_value = obs_value
         self.obs_epoch = obs_epoch
