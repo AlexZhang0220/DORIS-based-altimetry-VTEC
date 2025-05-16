@@ -179,7 +179,7 @@ def parse_lines_in_parallel(all_lines_chunks, obs_type: list[str], PRN: str, sta
 def interpolate_satellite_positions_xarray(df_obs: pd.DataFrame, sat_dataset: xr.Dataset, prn: str) -> pd.DataFrame:
 
     sat_data = sat_dataset.sel(sv=prn)
-    obs_time = pd.to_datetime(df_obs["obs_epoch"].values)
+    obs_time = pd.to_datetime(df_obs["obs_epoch"].values) + pd.to_timedelta(df_obs["receiver_clock_offset"], unit='s')
     unique_times = np.unique(obs_time)
 
     interp_result = sat_data.interp(time=unique_times)
