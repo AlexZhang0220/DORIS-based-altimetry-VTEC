@@ -50,10 +50,7 @@ if __name__ == '__main__':
 
         sp3_dir = "./DORISInput/sp3"
         matching_sp3 = find_sp3_files(sp3_dir, year%100, doy)
-        orbit = OrbitStorage()
-
-        for sp3_file in matching_sp3:
-            orbit.read_sp3(sp3_file, 'L39')
+        orbit = OrbitStorage(matching_sp3)
 
         obs = DORISStorage()
         file = f'./DORISInput/rinexobs/ja3rx{str(year)[-2:]}{doy:03d}.001'

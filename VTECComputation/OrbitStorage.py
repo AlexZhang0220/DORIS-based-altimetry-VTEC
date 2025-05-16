@@ -9,8 +9,13 @@ from pandas import Timestamp, Timedelta
 
 class OrbitStorage:
     def __init__(self, files: list[str]) -> None:
+        ds_list = []
+
         for file in files:
-            self.sat_dataset = gr.load(file)
+            ds = gr.load(file) 
+            ds_list.append(ds)
+
+        self.sat_dataset = xr.concat(ds_list, dim="time")
 
 
     

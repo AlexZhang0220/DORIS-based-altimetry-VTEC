@@ -132,7 +132,7 @@ def _parse_lines_chunk_df(chunk: list[str], obs_type: list[str], PRN: str, stati
     receiver_clock_offset = None
 
     for line in chunk:
-        if line[0:4] == "":
+        if line[0:4].isspace():
             continue
         elif line.startswith(">"):
             current_epoch = pd.to_datetime(line[2:31], format="%Y %m %d %H %M %S.%f")
