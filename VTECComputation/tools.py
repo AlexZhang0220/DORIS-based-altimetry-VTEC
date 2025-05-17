@@ -6,6 +6,23 @@ from pyproj import Proj, transform
 from pyproj import Transformer
 from astropy.time import Time
 from scipy.interpolate import RegularGridInterpolator
+from numba import njit
+
+@njit
+def batch_lagrange_interp_1d(x_known, y_known, x_interp):
+    n = len(x_known)
+    result = np.zeros_like(x_interp)
+    for j in range(len(x_interp)):
+        x = x_interp[j]
+        total = 0.0
+        for i in range(n):
+            term = y_known[i]
+            for k in range(n):
+                if k != i:
+                    term *= (x - x_known[k]) / (x_known[i] - x_known[k])
+            total += term
+        result[j] = total
+    return result
 
 def cart2enu(sat: List[float], station: List[float]):
 

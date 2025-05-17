@@ -2,9 +2,8 @@ from typing import List, Dict
 from ObjectClasses import DORISObs, Thresholds, PassObj, DORISBeacon
 from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
-from tools import get_elevation, get_map_value, Raypoint
-from pandas import Timestamp, Timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tools import batch_lagrange_interp_1d
 import numpy as np
 import mmap
 import pandas as pd
@@ -12,7 +11,7 @@ import xarray as xr
 
 class DORISStorage:
     def __init__(self) -> None:
-        self.storage = pd.DataFrame() # [station][epoch] = DORISObs
+        self.storage = pd.DataFrame()
         self.stations: List[DORISBeacon] = []
 
     def _parse_header(self, file: str) -> List[str]:
@@ -43,7 +42,7 @@ class DORISStorage:
 
         df_obs = parse_lines_in_parallel(chunks, obs_type, PRN, self.stations) # all observation in the form of data frame
 
-        df_obs = interpolate_satellite_positions_xarray(df_obs, orbit_data.sat_dataset, PRN) # include satellite position
+        df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN) # include satellite position
 
         df_obs = merge_station_position(df_obs, station_data.storage)
 
@@ -82,33 +81,6 @@ class DORISStorage:
                 if line[0:60].strip() == "JASON-3": 
                     return 'L39'
         return 0
-
-    def parse_doris_obs_two_lines(self, line1: str, line2: str, receiver_clock_offset: float, obs_epoch, obs_type, PRN):
-
-        ID = int(line1[1:3])
-        station = self.stations[ID - 1]
-        line1_fields = [line1[i:i+14].strip() for i in range(3, len(line1), 16)]
-        line2_fields = [line2[i:i+14].strip() for i in range(3, len(line2), 16)]
-        all_fields = line1_fields + line2_fields
-
-        obs_values = []
-        for field in all_fields:
-            if field:
-                obs_values.append(float(field))
-
-        if line1[50] == '7':
-            return None
-        
-        return DORISObs(
-            station.station_code,
-            ID,
-            station.shift,
-            receiver_clock_offset,
-            obs_values,
-            obs_epoch,
-            obs_type,
-            PRN
-        )
 
 def _split_lines_by_marker(lines: list[str], chunk_size: int = 1000, marker: str = ">") -> list[list[str]]:
         chunks = []
@@ -158,14 +130,11 @@ def _parse_lines_chunk_df(chunk: list[str], obs_type: list[str], PRN: str, stati
 
     return pd.DataFrame.from_records(records)
 
-def parse_worker(lines_chunk, obs_type: list[str], PRN: str, stations: list[DORISBeacon]):
-    return _parse_lines_chunk_df(lines_chunk, obs_type, PRN, stations)
-
 def parse_lines_in_parallel(all_lines_chunks, obs_type: list[str], PRN: str, stations: list[DORISBeacon], max_workers=1):
-
+    
     dfs = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(parse_worker, chunk, obs_type, PRN, stations) for chunk in all_lines_chunks]
+        futures = [executor.submit(_parse_lines_chunk_df, chunk, obs_type, PRN, stations) for chunk in all_lines_chunks]
 
         for future in as_completed(futures):
             try:
@@ -176,20 +145,58 @@ def parse_lines_in_parallel(all_lines_chunks, obs_type: list[str], PRN: str, sta
     df_all = pd.concat(dfs, ignore_index=True)
     return df_all
 
-def interpolate_satellite_positions_xarray(df_obs: pd.DataFrame, sat_dataset: xr.Dataset, prn: str) -> pd.DataFrame:
+def interpolate_satellite_positions_lagrange(
+    df_obs: pd.DataFrame,
+    sat_dataset: xr.Dataset,
+    prn: str,
+    num_neighbors: int = 8
+) -> pd.DataFrame:
 
     sat_data = sat_dataset.sel(sv=prn)
-    obs_time = pd.to_datetime(df_obs["obs_epoch"].values) + pd.to_timedelta(df_obs["receiver_clock_offset"], unit='s')
-    unique_times = np.unique(obs_time)
+    eph_times = pd.to_datetime(sat_data["time"].values)
+    eph_seconds = eph_times.astype(np.int64) // 10**9
+    eph_xyz = sat_data["position"].values * 1000  # km -> m
 
-    interp_result = sat_data.interp(time=unique_times)
-    interp_df = pd.DataFrame({
-        "obs_epoch": unique_times,
-        "sat_x": interp_result["position"].sel(ECEF="x").values * 1000,
-        "sat_y": interp_result["position"].sel(ECEF="y").values * 1000,
-        "sat_z": interp_result["position"].sel(ECEF="z").values * 1000,
+    # 构建观测时间（秒）
+    obs_time = pd.to_datetime(df_obs["obs_epoch"].values) + pd.to_timedelta(df_obs["receiver_clock_offset"], unit="s")
+    obs_seconds = obs_time.astype(np.int64) // 10**9
+
+    unique_seconds = np.unique(obs_seconds)
+
+    sat_x_list, sat_y_list, sat_z_list = [], [], []
+
+    for t in unique_seconds:
+        idx = np.searchsorted(eph_seconds, t)
+        half = num_neighbors // 2
+        start = max(0, idx - half)
+        end = min(len(eph_seconds), start + num_neighbors)
+        start = max(0, end - num_neighbors)
+
+        xs = np.array(eph_seconds[start:end])
+        ys_x = eph_xyz[start:end, 0]
+        ys_y = eph_xyz[start:end, 1]
+        ys_z = eph_xyz[start:end, 2]
+
+        if len(xs) < 2:
+            sat_x_list.append(np.nan)
+            sat_y_list.append(np.nan)
+            sat_z_list.append(np.nan)
+        else:
+            sat_x_list.append(batch_lagrange_interp_1d(xs, ys_x, np.array([t]))[0])
+            sat_y_list.append(batch_lagrange_interp_1d(xs, ys_y, np.array([t]))[0])
+            sat_z_list.append(batch_lagrange_interp_1d(xs, ys_z, np.array([t]))[0])
+
+    interp_df_unique = pd.DataFrame({
+        "obs_seconds": unique_seconds,
+        "sat_x": sat_x_list,
+        "sat_y": sat_y_list,
+        "sat_z": sat_z_list,
     })
-    df_obs = df_obs.merge(interp_df, on="obs_epoch", how="left")
+
+    df_obs = df_obs.copy()
+    df_obs["obs_seconds"] = obs_seconds
+    df_obs = df_obs.merge(interp_df_unique, on="obs_seconds", how="left")
+    df_obs = df_obs.drop(columns=["obs_seconds"])
 
     return df_obs
 
@@ -223,7 +230,6 @@ def merge_station_position(df_obs, stations: StationStorage):
         direction="backward"
     )
 
-    # 过滤掉没有匹配的测站坐标（obs_epoch 小于最早 soln_epoch）
     df_obs = df_obs[df_obs["soln_epoch"].notna()].copy()
 
     return df_obs
