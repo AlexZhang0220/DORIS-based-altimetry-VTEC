@@ -159,7 +159,7 @@ def interpolate_satellite_positions_lagrange(
 
     # 构建观测时间（秒）
     obs_time = pd.to_datetime(df_obs["obs_epoch"].values) + pd.to_timedelta(df_obs["receiver_clock_offset"], unit="s")
-    obs_seconds = obs_time.astype(np.int64) // 10**9
+    obs_seconds = obs_time.astype(np.int64) / 10**9
 
     unique_seconds = np.unique(obs_seconds)
 
