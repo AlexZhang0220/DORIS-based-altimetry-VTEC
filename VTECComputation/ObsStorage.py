@@ -2,8 +2,8 @@ from typing import List, Dict
 from ObjectClasses import DORISObs, Thresholds, PassObj, DORISBeacon
 from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from tools import batch_lagrange_interp_1d
+import constant as const
 import numpy as np
 import mmap
 import pandas as pd
@@ -33,6 +33,8 @@ class DORISStorage:
 
         df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN)
         df_obs = merge_station_position(df_obs, station_data.storage)
+
+        
 
         self.storage = df_obs
 
@@ -103,7 +105,7 @@ def _parse_lines_chunk_df(lines: list[str], obs_type: list[str], PRN: str, stati
                 "receiver_clock_offset": receiver_clock_offset,
                 "station_id": ID,
                 "station_code": stations[ID - 1].station_code,
-                "station_shift": stations[ID - 1].freq_shift,
+                "station_freq_shift": stations[ID - 1].freq_shift,
                 "PRN": PRN,
                 "L1": obs_fields[obs_type.index("L1")] if "L1" in obs_type else np.nan,
                 "L2": obs_fields[obs_type.index("L2")] if "L2" in obs_type else np.nan,
@@ -177,6 +179,7 @@ def merge_station_position(df_obs, stations: StationStorage):
             station_records.append({
                 "station_code": sta.station_code,
                 "soln_epoch": pd.to_datetime(epoch),
+                "ant_type": sta.antenna_types[j],
                 "sta_x": sta.soln_coor[j][0],
                 "sta_y": sta.soln_coor[j][1],
                 "sta_z": sta.soln_coor[j][2]
@@ -213,3 +216,49 @@ def merge_station_position(df_obs, stations: StationStorage):
         df_merged_final = pd.concat(merged_groups, ignore_index=True)
 
     return df_merged_final
+
+def compute_geom_corrected_dion(df_obs: pd.DataFrame) -> pd.DataFrame:
+
+    c = const.c
+    shift = df_obs["station_freq_shift"].values
+
+    # 是否为有频率偏移的观测点
+    shift_nonzero = shift != 0
+
+    # 频率偏移时的波长计算
+    d_lambda1 = np.where(shift_nonzero, c / (5e6 * 407.25 * (1 + shift * const.d_p_multik)), const.d_lambda1)
+    d_lambda2 = np.where(shift_nonzero, c / (5e6 * 80.25  * (1 + shift * const.d_p_multik)), const.d_lambda2)
+
+    d_k = np.where(shift_nonzero, (d_lambda2**2) / ((d_lambda2**2) - (d_lambda1**2)), const.d_k)
+    d_w = np.where(shift_nonzero, (d_lambda1**2) / 40.3, const.d_w)
+
+    L1 = df_obs["L1"].values
+    L2 = df_obs["L2"].values
+    elevation = df_obs["elevation"].values
+
+    prn_map = {
+        "L27": const.d_geomcorrJa2,
+        "L39": const.d_geomcorrJa3,
+        "L12": const.d_geomcorrCr2,
+        "L45": const.d_geomcorrHy2,
+        "L46": const.d_geomcorrSar,
+    }
+    sat_off = df_obs["PRN"].map(prn_map).fillna(0).values
+
+    ant_off = np.where(
+        df_obs["ant_type"].str.startswith("STAREC"), const.d_STAREC,
+        np.where(df_obs["ant_type"].str.startswith("ALCATEL"), const.d_ALCATEL, 0)
+    )
+
+    d_geomcorr = sat_off + ant_off
+
+    dion = -d_k * (L1 * d_lambda1 - L2 * d_lambda2)
+    correction = -d_k * (-d_geomcorr * np.sin(np.deg2rad(elevation)))
+    dion += correction
+
+    stec = dion * d_w / 1e16
+
+    df_obs["dion"] = dion
+    df_obs["STEC"] = stec
+
+    return df_obs

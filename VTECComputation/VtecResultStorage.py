@@ -7,14 +7,12 @@ from readFile import read_ionFile
 from joblib import Parallel, delayed
 from pandas import Timestamp, Timedelta
 from astropy.time import Time
-from OrbitStorage import OrbitStorage
-from RinexResultStorage import find_sp3_files
 import h5py
 import time
 import numpy as np
-import pickle
 import matplotlib.pyplot as plt
 from itertools import groupby, cycle
+import pandas as pd
 
 def split_and_filter_by_time_gap(station_obs: list[DORISObs], settings: Thresholds) -> list[PassObj]:
     passes = []
@@ -152,8 +150,8 @@ if __name__ == '__main__':
         process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
         doy = process_epoch.dayofyear
 
-        with open(f'./DORISObsStorage/{year}/DOY{doy:03d}.pkl', 'rb') as file:
-            obs = pickle.load(file)
+        with open(f'./DORISObsStorage/pandas/{year}/DOY{doy:03d}.parquet', 'rb') as path:
+            obs = pd.read_parquet(path)
 
         sat_clock_offset = compute_sat_clock_corrections(process_epoch, obs)
         
