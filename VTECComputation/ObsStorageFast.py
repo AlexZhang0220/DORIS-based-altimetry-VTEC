@@ -8,6 +8,7 @@ import numpy as np
 import mmap
 import pandas as pd
 import xarray as xr
+import warnings
 
 class DORISStorage:
     def __init__(self) -> None:
@@ -40,9 +41,9 @@ class DORISStorage:
                 lines = mmapped_file.read().decode('utf-8').splitlines()
                 chunks = _split_lines_by_marker(lines, 1000)
 
-        df_obs = parse_lines_in_parallel(chunks, obs_type, PRN, self.stations) # all observation in the form of data frame
+        df_obs = parse_lines_in_parallel(chunks, obs_type, PRN, self.stations) 
 
-        df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN) # include satellite position
+        df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN) 
 
         df_obs = merge_station_position(df_obs, station_data.storage)
 
@@ -130,7 +131,7 @@ def _parse_lines_chunk_df(chunk: list[str], obs_type: list[str], PRN: str, stati
 
     return pd.DataFrame.from_records(records)
 
-def parse_lines_in_parallel(all_lines_chunks, obs_type: list[str], PRN: str, stations: list[DORISBeacon], max_workers=1):
+def parse_lines_in_parallel(all_lines_chunks, obs_type: list[str], PRN: str, stations: list[DORISBeacon], max_workers=8):
     
     dfs = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -157,7 +158,6 @@ def interpolate_satellite_positions_lagrange(
     eph_seconds = eph_times.astype(np.int64) // 10**9
     eph_xyz = sat_data["position"].values * 1000  # km -> m
 
-    # 构建观测时间（秒）
     obs_time = pd.to_datetime(df_obs["obs_epoch"].values) + pd.to_timedelta(df_obs["receiver_clock_offset"], unit="s")
     obs_seconds = obs_time.astype(np.int64) / 10**9
 
@@ -202,34 +202,46 @@ def interpolate_satellite_positions_lagrange(
 
 def merge_station_position(df_obs, stations: StationStorage):
 
-    def get_station_data(stations):
-        station_records = []
-        for i, sta in enumerate(stations):
-            for j, epoch in enumerate(sta.soln_epochlist):
-                if j < len(sta.soln_coor):
-                    station_records.append({
-                        "station_code": sta,
-                        "soln_epoch": pd.Timestamp(epoch),
-                        "sta_x": sta.soln_coor[j][0],
-                        "sta_y": sta.soln_coor[j][1],
-                        "sta_z": sta.soln_coor[j][2]
-                    })
-        return pd.DataFrame(station_records)
+    station_records = []
 
-    df_station_records = get_station_data(stations)
+    for i, sta in enumerate(stations):
+        for j, epoch in enumerate(sta.soln_epochlist):
+            station_records.append({
+                "station_code": sta.station_code,
+                "soln_epoch": pd.to_datetime(epoch),
+                "sta_x": sta.soln_coor[j][0],
+                "sta_y": sta.soln_coor[j][1],
+                "sta_z": sta.soln_coor[j][2]
+            })
 
-    df_station_records = df_station_records.sort_values(by=["station_code", "soln_epoch"])
-    df_obs = df_obs.sort_values(by=["station_code", "obs_epoch"])
+    df_station_records = pd.DataFrame(station_records)
 
-    df_obs_with_sta = pd.merge_asof(
-        df_obs,
-        df_station_records,
-        by="station_code",
-        left_on="obs_epoch",
-        right_on="soln_epoch",
-        direction="backward"
-    )
+    merged_groups = []
 
-    df_obs = df_obs[df_obs["soln_epoch"].notna()].copy()
+    for station, obs_group in df_obs.groupby('station_code'):
+        record_group = df_station_records[df_station_records['station_code'] == station]
 
-    return df_obs
+        if record_group.empty:
+            obs_group[['sta_x', 'sta_y', 'sta_z']] = None
+            merged_groups.append(obs_group)
+            continue
+
+        obs_group_sorted = obs_group.sort_values('obs_epoch')
+        record_group_sorted = record_group.sort_values('soln_epoch')
+
+        merged = pd.merge_asof(
+            obs_group_sorted,
+            record_group_sorted,
+            by='station_code',
+            left_on='obs_epoch',
+            right_on='soln_epoch',
+            direction='backward'
+        )
+
+        merged_groups.append(merged)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+        df_merged_final = pd.concat(merged_groups, ignore_index=True)
+
+    return df_merged_final

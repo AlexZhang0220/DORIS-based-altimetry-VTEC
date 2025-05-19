@@ -34,7 +34,7 @@ if __name__ == '__main__':
     year = 2024
     month = 5
     day = 8
-    proc_days = 9
+    proc_days = 1
     start_dt = Timestamp(year, month, day)
     end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days)
 
@@ -55,8 +55,6 @@ if __name__ == '__main__':
         obs = DORISStorage()
         file = f'./DORISInput/rinexobs/ja3rx{str(year)[-2:]}{doy:03d}.001'
         obs.read_rinex_300(file, orbit, stations)
-        with open(f'./DORISObsStorage/{year}/DOY{doy:03d}.pkl', 'wb') as file:
-            pickle.dump(obs, file)
-
+        obs.storage.to_parquet(f'./DORISObsStorage/pandas/{year}/DOY{doy:03d}.parquet', engine="pyarrow", index=False)
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
 

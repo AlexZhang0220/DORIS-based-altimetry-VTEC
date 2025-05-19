@@ -95,8 +95,8 @@ class DORISObs:
         self.STEC = self.dion * d_w / 1e16    
     
 class Station:
-    def __init__(self, site_id: str):
-        self.site_id = site_id
+    def __init__(self, station_code: str):
+        self.station_code = station_code
         self.soln_epochlist = []  # List[Timestamp]: Different epochs for the station
         self.soln_coor = []  # List[List[float]]: XYZ coordinates for each epoch
         self.antenna_types = []  # List[str]: Antenna type for each epoch

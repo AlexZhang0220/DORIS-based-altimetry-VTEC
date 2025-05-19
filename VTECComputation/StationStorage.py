@@ -32,7 +32,7 @@ class StationStorage:
 
     def get_ant_type(self, station_code: str, epoch: Timestamp) -> str:
         for station in self.storage:
-            if station_code == station.site_id:
+            if station_code == station.station_code:
                 idx = self.find_interval_index(station.soln_epochlist, epoch)
                 if idx != -1:
                     return station.antenna_types[idx]
@@ -41,23 +41,23 @@ class StationStorage:
     
     def get_pos_cele(self, station_code: str, epoch: Timestamp):
         for station in self.storage:
-            if station_code == station.site_id:
+            if station_code == station.station_code:
                 idx = self.find_interval_index(station.soln_epochlist, epoch)
                 if idx != -1:
                     return np.array(station.soln_coor[idx])
                 return ''
         return ''
     
-    def get_or_create_station(self, site_id: str) -> Station:
+    def get_or_create_station(self, station_code: str) -> Station:
         """
         Retrieve an existing station object or create a new one if not found.
         """
         for station in self.storage:
-            if station.site_id == site_id:
+            if station.station_code == station_code:
                 return station
 
         # Create a new station if not found
-        new_station = Station(site_id)
+        new_station = Station(station_code)
         self.storage.append(new_station)
         return new_station
     
@@ -82,7 +82,7 @@ class StationStorage:
             antenna_type = record[42:62].strip() 
 
             for station in self.storage:
-                if station.site_id == record_site:
+                if station.station_code == record_site:
                     for i, soln in enumerate(station.soln_idx):
                         if soln == record_soln:  # Match solution index
                             station.antenna_types[i] = antenna_type
@@ -100,7 +100,7 @@ class StationStorage:
             stax, stay, staz, velx, vely, velz = records[i:i+6]
 
             # Extract site ID and solution index
-            site_id = stax[14:18].strip()  # SITE ID
+            station_code = stax[14:18].strip() 
             soln_ind = int(stax[22:26].strip())  # SOLUTION INDEX
             epoch_time = self.parse_custom_time(stax[27:39].strip())  # Epoch time (YY:DOY:SECOD)
 
@@ -116,7 +116,7 @@ class StationStorage:
 
             # Find the station instance in storagetorage
             for station in self.storage:
-                if station.site_id == site_id:
+                if station.station_code == station_code:
                     for idx, soln in enumerate(station.soln_idx):
                         if soln == soln_ind:  # Only update matching solution indices
                             delta_t = (start_time - epoch_time).total_seconds() / (365.25 * 24 * 3600)  # Years
