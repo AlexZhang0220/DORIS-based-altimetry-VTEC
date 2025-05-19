@@ -2,139 +2,213 @@ from typing import List, Dict
 from ObjectClasses import DORISObs, Thresholds, PassObj, DORISBeacon
 from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
-from tools import get_elevation, get_map_value, Raypoint
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tools import batch_lagrange_interp_1d
 import numpy as np
-import math
-import sys
+import mmap
+import pandas as pd
+import xarray as xr
+import warnings
 
 class DORISStorage:
     def __init__(self) -> None:
-        self.storage: List[Dict[str, DORISObs]] = [] # with [station][epoch] as index
-        self.passes: List[PassObj] = []
+        self.storage = pd.DataFrame()
         self.stations: List[DORISBeacon] = []
-        # station indexing is based on two assumptions which hold for RINEX 300: 
-        # 1. In STATION REFERENCE, stations are listed from 1 to station number, complete and non-redundant
-        # 2. For all other station records, e.g. time reference station, the station sequence (Dxx) are the same
-        # as used in STATION REFERENCE
-    def read_rinex_300(self, start_time: datetime, file: str, orbit_data: OrbitStorage, station_data: StationStorage, settings: Thresholds):
+
+    def _parse_header(self, file: str) -> List[str]:
+        header = []
         try:
-            with open(file, 'r') as rnxin:
-                headerfinish = False
-                prn = None # str
-                for line in rnxin:
-                    temp = line.rstrip()
-
-                    if not headerfinish:
-                        label = temp[60:80]
-                        if   label.startswith("RINEX VERSION / TYPE"): pass
-
-                        elif label.startswith("COMMENT"): 
-                            if "D = DORIS" in temp: 
-                                pass
-                            else: print('Not RINEX file for DORIS!')
-                            
-                        elif label.startswith("SATELLITE NAME"):
-                            if temp[0:60].strip() == "JASON-3": prn = "L39"
-
-                        elif label.startswith("SYS / # / OBS TYPES"):
-                            obs_type_count = int(temp[3:6])
-                            subtemp = temp[6:58]
-                            obs_type = [subtemp[i:i+4].strip() for i in range(0, 4*obs_type_count, 4)]
-
-                        elif label.startswith("STATION REFERENCE"):
-                            station = DORISBeacon(int(temp[1:3]), temp[5:9].lower(), temp[10:40].strip(), 
-                                                temp[40:50].strip(), int(temp[50:52]), int(temp[52:56]))
-                            self.stations.append(station)
-
-                        elif label.startswith("TIME REF STATION"):
-                            ID = int(temp[1:3]) 
-                            self.stations[ID-1].time_ref_bit = True
-                            self.stations[ID-1].bias = float(temp[5:19].strip())
-                            self.stations[ID-1].timeshift = float(temp[21:35].strip())
-                            continue
-
-                        elif label.startswith("END OF HEADER"):
-                            headerfinish = True
-                            self.storage = [[] for _ in range(len(self.stations) + 1)]
-                        
-                    else: # main content
-                        if temp.strip() == "":
-                            continue 
-                        elif temp[0] == ">":
-                            y = int(temp[2:6])
-                            m = int(temp[7:9])
-                            d = int(temp[10:12])
-                            h = int(temp[13:15])
-                            mi = int(temp[16:18])
-
-                            s, ms= temp[18:31].split('.', 1)
-                            s = int(s)
-                            ms = int(ms[0:6]) # six digit for datetime input
-                            obs_epoch = datetime(y,m,d,h,mi,s).replace(microsecond=ms)
-
-                            receiver_clock_offset = float(temp[43:56])
-                            obs_epoch += timedelta(seconds = receiver_clock_offset)
-
-                            if start_time.day == obs_epoch.day:
-                                obs_count = int(temp[34:37])
-                                line_per_obs = math.ceil(obs_type_count / 5)
-
-                                for _ in range(obs_count):
-                                    obs_value: List[float] = []
-                                    for line in range(line_per_obs):
-                                        temp = next(rnxin).rstrip()
-
-                                        if line == 0:
-                                            ID = int(temp[1:3])
-                                            station_code = self.stations[ID-1].station_code
-                                            time_freq_shift = self.stations[ID-1].shift
-
-                                        subtemp = temp[3:83]
-                                        # read single observations types
-                                        for j in range(5):
-                                            obs_value.append(float(subtemp[j * 16:(j + 1) * 16 - 2].strip()))
-
-                                    DORISObs.obs_type = obs_type
-                                    DORISObs.PRN = prn
-                                    obs = DORISObs(station_code, ID, time_freq_shift, obs_value, obs_epoch) 
-                                    
-                                    ## computation of satellite position
-                                    num_inter_point = 7 
-                                    # points used for lagrange interpolation, not consequential really
-                                    obs.pos_sat_cele = orbit_data.get_pos_cele_lagr_inter(obs, num_inter_point)  
-                                    if not obs.pos_sat_cele: 
-                                        continue      
-
-                                    ## computation of station position
-                                    obs.pos_sta_cele = station_data.get_pos_cele(obs.station_code)
-                                    if not obs.pos_sta_cele: 
-                                        continue  
-
-                                    obs.ant_type = station_data.get_ant_type(obs.station_code)
-                                    if not obs.ant_type: 
-                                        continue       
-
-                                    obs.elevation = get_elevation(obs.pos_sat_cele, obs.pos_sta_cele)
-                                    if obs.elevation < settings.ele_cut_off:
-                                        continue
-
-                                    Ion_height = 506700
-                                    # Ion_height = 450000
-
-                                    obs.ipp_lon, obs.ipp_lat = Raypoint(obs.pos_sat_cele, obs.pos_sta_cele, Ion_height)
-                                    obs.map_value = get_map_value(obs.elevation)
-                                    obs.geom_corr()
-                                    obs.VTEC = obs.STEC / obs.map_value        
-                                    self.storage[obs.station_id].append(obs)
-                                    obs = []
-                            else:
-                                continue
+            with open(file, 'r') as f:
+                for line in f:
+                    header.append(line)
+                    if "END OF HEADER" in line:
+                        break
         except IOError:
-            print(f"DORISpy----ObsStorage::read_rinex_300----Unable to open {file}")
-            sys.exit(1)
-                    
-                
-   
+            print(f"Unable to read the file: {file}")
+        return header
 
+    def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage):
+        header = self._parse_header(file)
+        obs_type = self._extract_obs_type_count(header)
+        self.stations = self._extract_stations_from_header(header)
+        self._extract_time_ref_station_from_header(header)
+        PRN = self._extract_satellite_PRN(header)
+        
+        with open(file, 'r') as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
+                # Skip header
+                mmapped_file.seek(mmapped_file.find(b"END OF HEADER") + len("END OF HEADER\n"))
+                lines = mmapped_file.read().decode('utf-8').splitlines()
 
+        df_obs = _parse_lines_chunk_df(lines, obs_type, PRN, self.stations) 
+
+        df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN)
+        df_obs = merge_station_position(df_obs, station_data.storage)
+        
+        self.storage = df_obs
+
+    def _extract_stations_from_header(self, header: List[str]) -> List[DORISBeacon]:
+        stations = []
+        for line in header:
+            if line[60:80].startswith("STATION REFERENCE"):
+                station = DORISBeacon(
+                    int(line[1:3]), line[5:9], line[10:40].strip(),
+                    line[40:50].strip(), int(line[50:52]), int(line[52:56])
+                )
+                stations.append(station)
+        return stations
+
+    def _extract_time_ref_station_from_header(self, header: List[str]):
+        for line in header:
+            if line[60:80].startswith("TIME REF STATION"):
+                station_number = int(line[1:3])
+                self.stations[station_number-1].time_ref_bit = True
+                self.stations[station_number-1].time_bias = float(line[5:19])
+                self.stations[station_number-1].time_shift = float(line[21:35])
+
+    def _extract_obs_type_count(self, header: List[str]) -> int:
+        for line in header:
+            if line[60:80].startswith("SYS / # / OBS TYPES"):
+                obs_type_count = int(line[3:6])
+                obs_type = [line[i+6:i+10].strip() for i in range(0, 4*obs_type_count, 4)]
+                return  obs_type
+        return 0
+    
+    def _extract_satellite_PRN(self, header: List[str]) -> str:
+        for line in header:
+            if line[60:80].startswith("SATELLITE NAME"):
+                if line[0:60].strip() == "JASON-3": 
+                    return 'L39'
+        return 0
+
+def _parse_lines_chunk_df(lines: list[str], obs_type: list[str], PRN: str, stations: list[DORISBeacon]) -> pd.DataFrame:
+    records = []
+    current_epoch = None
+    receiver_clock_offset = None
+
+    for line in lines:
+        if line[0:4].isspace():
+            continue
+        elif line.startswith(">"):
+            current_epoch = pd.to_datetime(line[2:31], format="%Y %m %d %H %M %S.%f")
+            receiver_clock_offset = float(line[44:56])
+        elif line.startswith("D"):
+            ID = int(line[1:3]) #station_id
+            if line[50] == '7':  # elevation < 5° -> skip
+                continue
+            obs_fields = [float(line[j:j + 14].strip()) for j in range(3, 83, 16)]
+            record = {
+                "obs_epoch": current_epoch,
+                "receiver_clock_offset": receiver_clock_offset,
+                "station_id": ID,
+                "station_code": stations[ID - 1].station_code,
+                "station_shift": stations[ID - 1].freq_shift,
+                "PRN": PRN,
+                "L1": obs_fields[obs_type.index("L1")] if "L1" in obs_type else np.nan,
+                "L2": obs_fields[obs_type.index("L2")] if "L2" in obs_type else np.nan,
+                "C1": obs_fields[obs_type.index("C1")] * 10 if "C1" in obs_type else np.nan,
+                "C2": obs_fields[obs_type.index("C2")] * 10 if "C2" in obs_type else np.nan,
+            }
+            records.append(record)
+
+    return pd.DataFrame.from_records(records)
+
+def interpolate_satellite_positions_lagrange(
+    df_obs: pd.DataFrame,
+    sat_dataset: xr.Dataset,
+    prn: str,
+    num_neighbors: int = 8
+) -> pd.DataFrame:
+
+    sat_data = sat_dataset.sel(sv=prn)
+    eph_times = pd.to_datetime(sat_data["time"].values)
+    eph_seconds = eph_times.astype(np.int64) // 10**9
+    eph_xyz = sat_data["position"].values * 1000  # km -> m
+
+    obs_time = pd.to_datetime(df_obs["obs_epoch"].values) + pd.to_timedelta(df_obs["receiver_clock_offset"], unit="s")
+    obs_seconds = obs_time.astype(np.int64) / 10**9
+
+    unique_seconds = np.unique(obs_seconds)
+
+    sat_x_list, sat_y_list, sat_z_list = [], [], []
+
+    for t in unique_seconds:
+        idx = np.searchsorted(eph_seconds, t)
+        half = num_neighbors // 2
+        start = max(0, idx - half)
+        end = min(len(eph_seconds), start + num_neighbors)
+        start = max(0, end - num_neighbors)
+
+        xs = np.array(eph_seconds[start:end])
+        ys_x = eph_xyz[start:end, 0]
+        ys_y = eph_xyz[start:end, 1]
+        ys_z = eph_xyz[start:end, 2]
+
+        if len(xs) < 2:
+            sat_x_list.append(np.nan)
+            sat_y_list.append(np.nan)
+            sat_z_list.append(np.nan)
+        else:
+            sat_x_list.append(batch_lagrange_interp_1d(xs, ys_x, np.array([t]))[0])
+            sat_y_list.append(batch_lagrange_interp_1d(xs, ys_y, np.array([t]))[0])
+            sat_z_list.append(batch_lagrange_interp_1d(xs, ys_z, np.array([t]))[0])
+
+    interp_df_unique = pd.DataFrame({
+        "obs_seconds": unique_seconds,
+        "sat_x": sat_x_list,
+        "sat_y": sat_y_list,
+        "sat_z": sat_z_list,
+    })
+
+    df_obs = df_obs.copy()
+    df_obs["obs_seconds"] = obs_seconds
+    df_obs = df_obs.merge(interp_df_unique, on="obs_seconds", how="left")
+    df_obs = df_obs.drop(columns=["obs_seconds"])
+
+    return df_obs
+
+def merge_station_position(df_obs, stations: StationStorage):
+
+    station_records = []
+
+    for i, sta in enumerate(stations):
+        for j, epoch in enumerate(sta.soln_epochlist):
+            station_records.append({
+                "station_code": sta.station_code,
+                "soln_epoch": pd.to_datetime(epoch),
+                "sta_x": sta.soln_coor[j][0],
+                "sta_y": sta.soln_coor[j][1],
+                "sta_z": sta.soln_coor[j][2]
+            })
+
+    df_station_records = pd.DataFrame(station_records)
+
+    merged_groups = []
+
+    for station, obs_group in df_obs.groupby('station_code'):
+        record_group = df_station_records[df_station_records['station_code'] == station]
+
+        if record_group.empty:
+            obs_group[['sta_x', 'sta_y', 'sta_z']] = None
+            merged_groups.append(obs_group)
+            continue
+
+        obs_group_sorted = obs_group.sort_values('obs_epoch')
+        record_group_sorted = record_group.sort_values('soln_epoch')
+
+        merged = pd.merge_asof(
+            obs_group_sorted,
+            record_group_sorted,
+            by='station_code',
+            left_on='obs_epoch',
+            right_on='soln_epoch',
+            direction='backward'
+        )
+
+        merged_groups.append(merged)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+        df_merged_final = pd.concat(merged_groups, ignore_index=True)
+
+    return df_merged_final

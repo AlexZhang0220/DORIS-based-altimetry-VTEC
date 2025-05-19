@@ -1,5 +1,5 @@
 from pandas import Timestamp
-from ObsStorageFast import DORISStorage
+from ObsStorage import DORISStorage
 from StationOffset import process_station_observations
 import constant as const
 import numpy as np
