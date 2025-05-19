@@ -34,6 +34,42 @@ def find_covering_sp3_files_from_dir(start_time: pd.Timestamp, end_time: pd.Time
                 matching_files.append(folder_path + '/' + sp3_file.name)
     return sorted(matching_files)
 
+def regenerate_daily_obs_with_margin(
+    start_time: Timestamp,
+    end_time: Timestamp,
+    data_dir: Path,
+    margin_minutes: int = 30,
+):
+    year = start_time.year
+    margin = Timedelta(minutes=margin_minutes)
+
+    def load_day_data(doy_val: int) -> pd.DataFrame:
+        path = data_dir / f"{year}/DOY{doy_val:03d}.parquet"
+        if not path.exists():
+            return pd.DataFrame()
+        df = pd.read_parquet(path)
+        return df
+
+    for day in pd.date_range(start=start_time, end=end_time, freq="D"):
+        doy = day.dayofyear
+        df_prev = load_day_data(doy - 1)
+        df_curr = load_day_data(doy)
+        df_next = load_day_data(doy + 1)
+
+        if df_curr.empty:
+            continue 
+
+        df_all = pd.concat([df_prev, df_curr, df_next], ignore_index=True)
+        df_all = df_all.sort_values("obs_epoch")
+
+        start_window = day - margin
+        end_window = day + Timedelta(days=1) + margin
+
+        df_with_margin = df_all[(df_all["obs_epoch"] >= start_window) & (df_all["obs_epoch"] < end_window)]
+
+        save_path = data_dir / f"{year}/DOY{doy:03d}.parquet"
+        df_with_margin.to_parquet(save_path, index=False, engine="pyarrow")
+
 if __name__ == '__main__':
 
     start_time = time.time()
@@ -43,7 +79,7 @@ if __name__ == '__main__':
     day = 8
     proc_days = 30
     start_dt = Timestamp(year, month, day)
-    end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days)
+    end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days - 1)
 
     settings = Thresholds(max_dion_gap=None, max_obs_epoch_gap=None, min_obs_count=None, ele_cut_off=0) 
 
@@ -55,6 +91,7 @@ if __name__ == '__main__':
     matching_sp3 = find_covering_sp3_files_from_dir(start_dt, end_dt, sp3_dir)
     orbit = OrbitStorage(matching_sp3)
     
+    obs_dir = Path("./DORISObsStorage/pandas")
     for i in range(proc_days):
         process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
         doy = process_epoch.dayofyear
@@ -62,7 +99,9 @@ if __name__ == '__main__':
         obs = DORISStorage()
         file = f'./DORISInput/rinexobs/ja3rx{str(year)[-2:]}{doy:03d}.001'
         obs.read_rinex_300(file, orbit, stations)
-        obs.storage.to_parquet(f'./DORISObsStorage/pandas/{year}/DOY{doy:03d}.parquet', engine="pyarrow", index=False)
+        obs.storage.to_parquet(obs_dir / f"{year}/DOY{doy:03d}.parquet", engine="pyarrow", index=False)
+
+    regenerate_daily_obs_with_margin(start_dt, end_dt, obs_dir, margin_minutes=30)
 
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
 

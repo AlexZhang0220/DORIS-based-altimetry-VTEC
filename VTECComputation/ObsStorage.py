@@ -15,17 +15,6 @@ class DORISStorage:
         self.storage = pd.DataFrame()
         self.stations: List[DORISBeacon] = []
 
-    def _parse_header(self, file: str) -> List[str]:
-        header = []
-        try:
-            with open(file, 'r') as f:
-                for line in f:
-                    header.append(line)
-                    if "END OF HEADER" in line:
-                        break
-        except IOError:
-            print(f"Unable to read the file: {file}")
-        return header
 
     def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage):
         header = self._parse_header(file)
@@ -44,9 +33,21 @@ class DORISStorage:
 
         df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN)
         df_obs = merge_station_position(df_obs, station_data.storage)
-        
+
         self.storage = df_obs
 
+    def _parse_header(self, file: str) -> List[str]:
+        header = []
+        try:
+            with open(file, 'r') as f:
+                for line in f:
+                    header.append(line)
+                    if "END OF HEADER" in line:
+                        break
+        except IOError:
+            print(f"Unable to read the file: {file}")
+        return header
+    
     def _extract_stations_from_header(self, header: List[str]) -> List[DORISBeacon]:
         stations = []
         for line in header:
