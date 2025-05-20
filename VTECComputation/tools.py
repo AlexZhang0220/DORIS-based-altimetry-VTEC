@@ -62,7 +62,7 @@ def el(sat_pos_cele: List[float], sta_pos_cele: List[float]) -> float:
     numerator = np.dot(sta_pos_cele,p)
     denumerator = np.linalg.norm(sta_pos_cele) * np.linalg.norm(p)
 
-    return np.rad2deg(numerator / denumerator)
+    return np.rad2deg(numerator / denumerator) #arccos呢？？？
 
 def Raypoint(sat_pos_cele: List[float], sta_pos_cele: List[float], height: float):
 

@@ -1,8 +1,9 @@
-from typing import List, Dict
-from ObjectClasses import DORISObs, Thresholds, PassObj, DORISBeacon
+from typing import List
+from ObjectClasses import  DORISBeacon
 from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
 from tools import batch_lagrange_interp_1d
+from pyproj import Transformer
 import constant as const
 import numpy as np
 import mmap
@@ -10,18 +11,22 @@ import pandas as pd
 import xarray as xr
 import warnings
 
+from dataclasses import dataclass
+@dataclass
+class RINEXHeaderInfo:
+    obs_type: List[str]
+    stations: List[DORISBeacon]
+    PRN: str
+
 class DORISStorage:
     def __init__(self) -> None:
         self.storage = pd.DataFrame()
         self.stations: List[DORISBeacon] = []
 
-
     def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage):
-        header = self._parse_header(file)
-        obs_type = self._extract_obs_type_count(header)
-        self.stations = self._extract_stations_from_header(header)
-        self._extract_time_ref_station_from_header(header)
-        PRN = self._extract_satellite_PRN(header)
+        
+        header_info = self._parse_and_extract_header_info(file)
+        self.stations = header_info.stations
         
         with open(file, 'r') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
@@ -29,61 +34,59 @@ class DORISStorage:
                 mmapped_file.seek(mmapped_file.find(b"END OF HEADER") + len("END OF HEADER\n"))
                 lines = mmapped_file.read().decode('utf-8').splitlines()
 
-        df_obs = _parse_lines_chunk_df(lines, obs_type, PRN, self.stations) 
-
-        df_obs = interpolate_satellite_positions_lagrange(df_obs, orbit_data.sat_dataset, PRN)
-        df_obs = merge_station_position(df_obs, station_data.storage)
-
-        
+        df_obs = (
+            _parse_lines_chunk_df(lines, header_info.obs_type, header_info.PRN, self.stations)
+            .pipe(interpolate_satellite_positions_lagrange, orbit_data.sat_dataset, header_info.PRN)
+            .pipe(merge_station_position, station_data.storage)
+            .pipe(get_elevation_and_map_value) 
+            .pipe(compute_geom_corrected_dion)
+            .pipe(get_ipp_position) 
+        )
 
         self.storage = df_obs
 
-    def _parse_header(self, file: str) -> List[str]:
-        header = []
-        try:
-            with open(file, 'r') as f:
-                for line in f:
-                    header.append(line)
-                    if "END OF HEADER" in line:
-                        break
-        except IOError:
-            print(f"Unable to read the file: {file}")
-        return header
-    
-    def _extract_stations_from_header(self, header: List[str]) -> List[DORISBeacon]:
+    def _parse_and_extract_header_info(self, file: str) -> RINEXHeaderInfo:
+        obs_type = []
         stations = []
-        for line in header:
-            if line[60:80].startswith("STATION REFERENCE"):
-                station = DORISBeacon(
-                    int(line[1:3]), line[5:9], line[10:40].strip(),
-                    line[40:50].strip(), int(line[50:52]), int(line[52:56])
-                )
-                stations.append(station)
-        return stations
+        PRN = None
+        SATELLITE_NAME_TO_PRN = {
+            "JASON-3":      "L39",
+            "CRYOSAT-2":    "L12",
+            "SARAL":        "L46",
+            "SENTINEL-3A":  "L74",
+            "SENTINEL-3B":  "L98",
+        }
+        with open(file, 'r') as f:
+            for line in f:
+                label = line[60:80].strip()
 
-    def _extract_time_ref_station_from_header(self, header: List[str]):
-        for line in header:
-            if line[60:80].startswith("TIME REF STATION"):
-                station_number = int(line[1:3])
-                self.stations[station_number-1].time_ref_bit = True
-                self.stations[station_number-1].time_bias = float(line[5:19])
-                self.stations[station_number-1].time_shift = float(line[21:35])
+                if label == "SYS / # / OBS TYPES":
+                    obs_type_count = int(line[3:6])
+                    obs_type = [line[i+6:i+10].strip() for i in range(0, 4 * obs_type_count, 4)]
 
-    def _extract_obs_type_count(self, header: List[str]) -> int:
-        for line in header:
-            if line[60:80].startswith("SYS / # / OBS TYPES"):
-                obs_type_count = int(line[3:6])
-                obs_type = [line[i+6:i+10].strip() for i in range(0, 4*obs_type_count, 4)]
-                return  obs_type
-        return 0
+                elif label == "STATION REFERENCE":
+                    station = DORISBeacon(
+                        int(line[1:3]), line[5:9], line[10:40].strip(),
+                        line[40:50].strip(), int(line[50:52]), int(line[52:56])
+                    )
+                    stations.append(station)
+
+                elif label == "TIME REF STATION":
+                    station_number = int(line[1:3])
+                    stations[station_number - 1].time_ref_bit = True
+                    stations[station_number - 1].time_bias = float(line[5:19])
+                    stations[station_number - 1].time_shift = float(line[21:35])
+
+                elif label == "SATELLITE NAME":
+                    sat_name = line[0:60].strip()
+                    if sat_name in SATELLITE_NAME_TO_PRN:
+                        PRN = SATELLITE_NAME_TO_PRN[sat_name]
+
+                elif label == "END OF HEADER":
+                    break
+
+        return RINEXHeaderInfo(obs_type, stations, PRN)
     
-    def _extract_satellite_PRN(self, header: List[str]) -> str:
-        for line in header:
-            if line[60:80].startswith("SATELLITE NAME"):
-                if line[0:60].strip() == "JASON-3": 
-                    return 'L39'
-        return 0
-
 def _parse_lines_chunk_df(lines: list[str], obs_type: list[str], PRN: str, stations: list[DORISBeacon]) -> pd.DataFrame:
     records = []
     current_epoch = None
@@ -96,7 +99,7 @@ def _parse_lines_chunk_df(lines: list[str], obs_type: list[str], PRN: str, stati
             current_epoch = pd.to_datetime(line[2:31], format="%Y %m %d %H %M %S.%f")
             receiver_clock_offset = float(line[44:56])
         elif line.startswith("D"):
-            ID = int(line[1:3]) #station_id
+            ID = int(line[1:3]) # station id in rinex header
             if line[50] == '7':  # elevation < 5° -> skip
                 continue
             obs_fields = [float(line[j:j + 14].strip()) for j in range(3, 83, 16)]
@@ -163,14 +166,13 @@ def interpolate_satellite_positions_lagrange(
         "sat_z": sat_z_list,
     })
 
-    df_obs = df_obs.copy()
     df_obs["obs_seconds"] = obs_seconds
     df_obs = df_obs.merge(interp_df_unique, on="obs_seconds", how="left")
     df_obs = df_obs.drop(columns=["obs_seconds"])
 
     return df_obs
 
-def merge_station_position(df_obs, stations: StationStorage):
+def merge_station_position(df_obs: pd.DataFrame, stations: StationStorage) -> pd.DataFrame:
 
     station_records = []
 
@@ -217,18 +219,100 @@ def merge_station_position(df_obs, stations: StationStorage):
 
     return df_merged_final
 
+def get_elevation_and_map_value(df_obs: pd.DataFrame) -> pd.DataFrame:
+    # elevation
+    transformer = Transformer.from_crs("EPSG:4978", "EPSG:4326", always_xy=True)
+
+    lon, lat, _ = transformer.transform(df_obs['sta_x'].values,
+                                        df_obs['sta_y'].values,
+                                        df_obs['sta_z'].values,
+                                        radians=True)
+
+    sin_lon, cos_lon = np.sin(lon), np.cos(lon)
+    sin_lat, cos_lat = np.sin(lat), np.cos(lat)
+
+    R = np.array([
+        [-sin_lon,            cos_lon,            np.zeros_like(lon)],
+        [-sin_lat * cos_lon, -sin_lat * sin_lon,  cos_lat],
+        [ cos_lat * cos_lon,  cos_lat * sin_lon,  sin_lat]
+    ])  # shape: (3, 3, N)
+    R = R.transpose(2, 0, 1)  # shape: (N, 3, 3)
+
+    vec = df_obs[['sat_x', 'sat_y', 'sat_z']].values - df_obs[['sta_x', 'sta_y', 'sta_z']].values  # shape: (N, 3)
+
+    enu = np.einsum('nij,nj->ni', R, vec)  # shape: (N, 3)
+
+    horizontal_norm = np.linalg.norm(enu[:, 0:2], axis=1)
+    total_norm = np.linalg.norm(enu, axis=1)
+    elevation_rad = np.arccos(horizontal_norm / total_norm)
+
+    df_obs['elevation'] = np.rad2deg(elevation_rad)
+
+    # map value
+    AE84 = const.AE84
+    layer_height = const.ion_height
+    alpha = 0.9782
+
+    z_angle = np.pi/2 - elevation_rad
+    sin_term = np.sin(alpha * z_angle)
+
+    ratio = AE84 / (AE84 + layer_height)
+    map_value = 1 / np.cos(np.arcsin(ratio * sin_term))
+
+    df_obs['map_value'] = map_value
+
+    return df_obs
+
+def get_ipp_position(df_obs: pd.DataFrame, height: float=506700) -> pd.DataFrame:
+    AE84 = const.AE84
+
+    sat = df_obs[['sat_x', 'sat_y', 'sat_z']].values
+    sta = df_obs[['sta_x', 'sta_y', 'sta_z']].values
+
+    alpha = np.deg2rad(90 + df_obs['elevation'].values)
+
+    transformer = Transformer.from_crs("EPSG:4978", "EPSG:4326", always_xy=True)
+    sta_lonlat = np.array(transformer.transform(sta[:, 0], sta[:, 1], sta[:, 2])).T
+    sta_h = sta_lonlat[:, 2]
+
+    vec_rs = sat - sta
+    Drs = np.linalg.norm(vec_rs, axis=1)
+
+    term1 = (AE84 + sta_h) * np.cos(alpha)
+    under_sqrt = np.square(term1) + (AE84 + height)**2 - (AE84 + sta_h)**2
+    under_sqrt = np.maximum(under_sqrt, 0)  
+    term2 = np.sqrt(under_sqrt)
+
+    D_rP1 = term1 + term2
+    D_rP2 = term1 - term2
+
+    Scale1 = D_rP1 / Drs
+    Scale2 = D_rP2 / Drs
+
+    vec1 = sta + (vec_rs.T * Scale1).T
+    vec2 = sta + (vec_rs.T * Scale2).T
+
+    dist1 = np.linalg.norm(sat - vec1, axis=1)
+    dist2 = np.linalg.norm(sat - vec2, axis=1)
+
+    use_vec1 = dist1 <= dist2
+    IPP = np.where(use_vec1[:, np.newaxis], vec1, vec2)
+
+    ipp_lon, ipp_lat, _ = transformer.transform(IPP[:, 0], IPP[:, 1], IPP[:, 2])
+
+    df_obs['ipp_lon'] = ipp_lon
+    df_obs['ipp_lat'] = ipp_lat
+
+    return df_obs
+
 def compute_geom_corrected_dion(df_obs: pd.DataFrame) -> pd.DataFrame:
 
     c = const.c
     shift = df_obs["station_freq_shift"].values
-
-    # 是否为有频率偏移的观测点
     shift_nonzero = shift != 0
 
-    # 频率偏移时的波长计算
     d_lambda1 = np.where(shift_nonzero, c / (5e6 * 407.25 * (1 + shift * const.d_p_multik)), const.d_lambda1)
     d_lambda2 = np.where(shift_nonzero, c / (5e6 * 80.25  * (1 + shift * const.d_p_multik)), const.d_lambda2)
-
     d_k = np.where(shift_nonzero, (d_lambda2**2) / ((d_lambda2**2) - (d_lambda1**2)), const.d_k)
     d_w = np.where(shift_nonzero, (d_lambda1**2) / 40.3, const.d_w)
 
@@ -254,7 +338,7 @@ def compute_geom_corrected_dion(df_obs: pd.DataFrame) -> pd.DataFrame:
 
     dion = -d_k * (L1 * d_lambda1 - L2 * d_lambda2)
     correction = -d_k * (-d_geomcorr * np.sin(np.deg2rad(elevation)))
-    dion += correction
+    dion -= correction
 
     stec = dion * d_w / 1e16
 
