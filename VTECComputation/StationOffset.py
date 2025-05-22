@@ -2,7 +2,7 @@
 from ObjectClasses import DORISObs
 from OrbitStorage import OrbitStorage
 from pandas import Timestamp, Timedelta
-from RinexResultStorage import find_sp3_files
+from RinexResultStorage import find_covering_sp3_files_from_dir
 import constant as const
 import numpy as np
 import pickle

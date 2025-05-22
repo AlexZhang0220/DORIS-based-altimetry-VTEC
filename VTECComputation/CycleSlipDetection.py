@@ -1,40 +1,30 @@
 from ObjectClasses import DORISObs, PassObj
 import numpy as np
+import pandas as pd
 from astropy.time import Time
-from pandas import Timestamp, Timedelta
 import constant as const
-from OrbitStorage import OrbitStorage
-from ObjectClasses import SatPos
 from scipy.stats import zscore
 import matplotlib.pyplot as plt
 
-def group_observations_by_time(station_obs: list[DORISObs], min_obs_count):
-    """
-    Groups observations into satellite passes based on time gaps.
-    """
-    if len(station_obs) < 10:
-        return [], 0, ""
+def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', elev_thres=10.0, max_gap_seconds=9, min_obs_count=30) -> list[pd.DataFrame]:
+
+    df = df.copy()
+    # df[time_col] = pd.to_datetime(df[time_col])
     
-    passes = []
-    current_pass = [station_obs[0]]
-    reference_time = None
+    df = df.sort_values(by=time_col).reset_index(drop=True)
     
-    for i in range(1, len(station_obs)):
-        time_gap = (station_obs[i].obs_epoch - station_obs[i - 1].obs_epoch).total_seconds()
-        if time_gap < 9:
-            current_pass.append(station_obs[i])
-            if not reference_time and time_gap > 5:
-                reference_time = station_obs[i].obs_epoch.second % 10
-                antenna_type = station_obs[i].ant_type[:6]
-        else:
-            if len(current_pass) >= min_obs_count:
-                passes.append(current_pass)
-            current_pass = [station_obs[i]]
+    time_diff = df[time_col].diff().dt.total_seconds().fillna(0)
     
-    if len(current_pass) >= min_obs_count:
-        passes.append(current_pass)
+    segment_id = (time_diff > max_gap_seconds).cumsum()
+    df['segment_id'] = segment_id
     
-    return passes, reference_time, antenna_type
+    final_groups = []
+    for _, group in df.groupby('segment_id'):
+        group_filtered = group[group[elev_col] > elev_thres]
+        if len(group_filtered) >= min_obs_count:
+            final_groups.append(group_filtered.reset_index(drop=True))
+            
+    return final_groups
 
 def create_pass_object(observations: list[DORISObs]) -> PassObj:
     """
@@ -51,91 +41,98 @@ def create_pass_object(observations: list[DORISObs]) -> PassObj:
         station_id=observations[0].station_id
     )
 
-def detect_passes(station_obs: list[DORISObs], satellite_clock_offsets: list[float], min_obs_count) -> list[PassObj]:
+def detect_passes(obs_per_station:pd.DataFrame, min_obs_count) -> list[PassObj]:
     """
     Detects satellite passes and applies cycle slip detection.
     """
     passes, elev_list, diff_res_list = [], [], []
     # sat_bias, sat_shift, sat_sec_shift = satellite_clock_offsets
-    grouped_obs, reference_time, antenna_type = group_observations_by_time(station_obs, min_obs_count)
+    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station)
     
-    if not grouped_obs:
-        return [], [], []
-
-    # observation_start = grouped_obs[0][0].obs_epoch.replace(hour=0, minute=0, second=0, microsecond=0)
+    if not grouped_obs_per_station:
+        return []
     
-    if antenna_type == 'STAREC':
-        L1_pco_offset = const.jason3_L1_pco + const.starec_L1_pco
+    sta_ant_type = obs_per_station['sta_ant_type'].values[0]
+    prn = obs_per_station['PRN'].values[0]
+    station_freq_shift = obs_per_station['station_freq_shift'].values[0]
+    
+    if sta_ant_type[0:6] == 'STAREC' and prn == "L39":
+        L1_pco_offset = const.jason3_L1_pco + const.starec_sL1_pco
         L2_pco_offset = const.jason3_L2_pco + const.starec_L2_pco
-    elif antenna_type == 'ALCATEL':
+    elif sta_ant_type[0:7] == 'ALCATEL' and prn == "L39":
         L1_pco_offset = const.jason3_L1_pco + const.alcatel_L1_pco
         L2_pco_offset = const.jason3_L2_pco + const.alcatel_L2_pco
     else:
-        return [], [], []
+        return []
     
-    if grouped_obs[0][0].station_shift != 0:
-        d_lambda1 = const.c / (5e6 * 407.25 * (1 + grouped_obs[0][0].station_shift * const.d_p_multik))
-        d_lambda2 = const.c / (5e6 * 80.25 * (1 + grouped_obs[0][0].station_shift * const.d_p_multik))
-    else:
-        d_lambda1 = const.d_lambda1
-        d_lambda2 = const.d_lambda2
+    d_lambda1 = const.c / (5e6 * 407.25 * (1 + station_freq_shift * const.d_p_multik))
+    d_lambda2 = const.c / (5e6 * 80.25 * (1 + station_freq_shift * const.d_p_multik))
 
     cycle_slip_pco_offset = (5 / d_lambda1 * L1_pco_offset) - (1 / d_lambda2 * L2_pco_offset)
     geom_factor = 5 / d_lambda1 - 1 / d_lambda2
-    time_step = 10  # seconds
     
-    for obs_pass in grouped_obs:
-        elevations = np.array([obs.elevation for obs in obs_pass])
-        valid_indices = elevations > 10
-        if valid_indices.sum() < 10:
-            continue
-        
-        filtered_pass = np.array(obs_pass)[valid_indices]
-        elevations = elevations[valid_indices]
-        condition_A = filtered_pass[0].obs_epoch.second % 10 == reference_time
-        # delta_sec = np.array([(obs.obs_epoch - observation_start).total_seconds() for obs in filtered_pass])
-        # satellite_offsets = sat_bias + sat_shift * delta_sec + sat_sec_shift * delta_sec ** 2
-        L1_phase = np.array([obs.L1 for obs in filtered_pass])
-        L2_phase = np.array([obs.L2 for obs in filtered_pass])
-        if np.max(abs(np.diff(L1_phase)))> 5e5:
+    for grouped_obs in grouped_obs_per_station:    
+
+        if grouped_obs["L1"].diff().abs().max(skipna=True) > 5e5:
         # abnormal phase observation; large jumps between epoches
             continue
-        cycle_slip_phase = 5 * L1_phase - L2_phase
-        geom_distances = np.linalg.norm([obs.pos_sat_cele - obs.pos_sta_cele for obs in filtered_pass], axis=1)
+
+        elev_rad = np.deg2rad(grouped_obs['elevation'].values)
+        relative_sec = (grouped_obs['obs_epoch'] - grouped_obs['obs_epoch'].iloc[0]).dt.total_seconds()
+
+        cycle_slip_phase = 5 * grouped_obs["L1"] - grouped_obs["L2"]
+        geom_distances = np.sqrt(
+            (grouped_obs["sat_x"] - grouped_obs["sta_x"])**2 +
+            (grouped_obs["sat_y"] - grouped_obs["sta_y"])**2 +
+            (grouped_obs["sat_z"] - grouped_obs["sta_z"])**2
+        )
         corrected_geom_distances = (geom_factor * geom_distances 
-                                    - cycle_slip_pco_offset * np.sin(np.deg2rad(elevations)))                         
-        mapping_func = 1 / np.sin(np.deg2rad(elevations))
+                                    - cycle_slip_pco_offset * np.sin(elev_rad))                         
+        mapping_func = 1 / np.sin(elev_rad)
         estimated_cycle_slip = cycle_slip_phase - corrected_geom_distances      
-        indices = np.arange(len(estimated_cycle_slip))
-        result_array = np.where(indices % 2 == 0, indices // 2, indices // 2 + (0.3 if condition_A else 0.7))
  
-        X = np.column_stack((np.ones(len(estimated_cycle_slip)), result_array * time_step, mapping_func))
+        X = np.column_stack((
+            np.ones(len(corrected_geom_distances)),
+            relative_sec,
+            mapping_func
+        ))
+        
         beta, _, _, _ = np.linalg.lstsq(X, estimated_cycle_slip, rcond=None)
         residuals = estimated_cycle_slip - (X @ beta)
         diff_residuals = np.diff(residuals)
         z_scores = np.abs(zscore(diff_residuals))
-        split_points = np.where(z_scores > 3)[0] + 1 if np.max(np.abs(diff_residuals)) > 10 else np.array([], dtype=int)
-        split_points = np.hstack(([0], split_points, [len(residuals)]))
-        if len(split_points) == 2:
-            sub_passes = np.split(filtered_pass, np.where(np.abs(diff_residuals) > 3.5)[0] + 1)
-            elev_list.extend(elevations[0:-1])
-            diff_res_list.extend(diff_residuals)
+    
+        if np.max(np.abs(diff_residuals)) > 10:
+            split_points = np.where(z_scores > 3)[0] + 1
         else:
-            sub_passes = []
-            for i in range(len(split_points) - 1):
-                start, end = split_points[i], split_points[i + 1]
-                if end - start >= min_obs_count:
-                    beta_sub, _, _, _ = np.linalg.lstsq(X[start:end], estimated_cycle_slip[start:end], rcond=None)
-                    residual_sub = estimated_cycle_slip[start:end] - (X[start:end] @ beta_sub)
-                    diff_residual_sub = np.diff(residual_sub)
-                    local_splits = np.where(diff_residual_sub > 3.5)[0] + 1
-                    local_splits = np.hstack(([0], local_splits, [len(residual_sub)]))
-                    sub_passes.extend(np.split(filtered_pass[start:end], local_splits)[1:-1])                  
-                    elev_list.extend(elevations[start:end-1])
-                    diff_res_list.extend(diff_residual_sub)
-        
-        for sub_pass in sub_passes:
-            if len(sub_pass) >= min_obs_count:
-                passes.append(create_pass_object(sub_pass.tolist()))
+            split_points = np.array([], dtype=int)
+
+        split_points = np.hstack(([0], split_points, [len(estimated_cycle_slip)]))
+
+        for i in range(len(split_points) - 1):
+            start, end = split_points[i], split_points[i+1]
+            if end - start < min_obs_count:
+                continue
+
+            X_sub = np.column_stack([
+                np.ones(end - start),
+                relative_sec[start:end],
+                mapping_func[start:end]
+            ])
+            y_sub = estimated_cycle_slip[start:end]
+            beta_sub, _, _, _ = np.linalg.lstsq(X_sub, y_sub, rcond=None)
+            residuals_sub = y_sub - X_sub @ beta_sub
+            diff_res_sub = np.diff(residuals_sub)
+
+            jump_idx = np.where(diff_res_sub > 3.5)[0] + 1
+            jump_idx = np.hstack(([0], jump_idx, [len(y_sub)]))
+
+            for j in range(len(jump_idx) - 1):
+                seg_start = start + jump_idx[j]
+                seg_end = start + jump_idx[j + 1]
+                if seg_end - seg_start >= min_obs_count:
+                    seg = grouped_obs.iloc[seg_start:seg_end]
+                    passes.append(create_pass_object(seg[['obs_epoch', 'ipp_lat', 'ipp_lon',
+                                                        'STEC', 'elevation', 'map_value',
+                                                        'station_code', 'station_id']].values.tolist()))
                 
-    return passes, elev_list, diff_res_list

@@ -25,12 +25,14 @@ class DORISStorage:
 
     def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage):
         
+        # header
         header_info = self._parse_and_extract_header_info(file)
         self.stations = header_info.stations
         
+        # main obs
         with open(file, 'r') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
-                # Skip header
+                # Skip header, read into memory
                 mmapped_file.seek(mmapped_file.find(b"END OF HEADER") + len("END OF HEADER\n"))
                 lines = mmapped_file.read().decode('utf-8').splitlines()
 
@@ -39,8 +41,8 @@ class DORISStorage:
             .pipe(interpolate_satellite_positions_lagrange, orbit_data.sat_dataset, header_info.PRN)
             .pipe(merge_station_position, station_data.storage)
             .pipe(get_elevation_and_map_value) 
-            .pipe(compute_geom_corrected_dion)
-            .pipe(get_ipp_position) 
+            .pipe(get_ipp_position)
+            .pipe(compute_geom_corrected_dion)        
         )
 
         self.storage = df_obs
@@ -181,7 +183,7 @@ def merge_station_position(df_obs: pd.DataFrame, stations: StationStorage) -> pd
             station_records.append({
                 "station_code": sta.station_code,
                 "soln_epoch": pd.to_datetime(epoch),
-                "ant_type": sta.antenna_types[j],
+                "sta_ant_type": sta.antenna_types[j],
                 "sta_x": sta.soln_coor[j][0],
                 "sta_y": sta.soln_coor[j][1],
                 "sta_z": sta.soln_coor[j][2]
@@ -216,7 +218,7 @@ def merge_station_position(df_obs: pd.DataFrame, stations: StationStorage) -> pd
     with warnings.catch_warnings():
         warnings.simplefilter(action='ignore', category=FutureWarning)
         df_merged_final = pd.concat(merged_groups, ignore_index=True)
-
+        df_merged_final = df_merged_final.drop(columns=["soln_epoch"])
     return df_merged_final
 
 def get_elevation_and_map_value(df_obs: pd.DataFrame) -> pd.DataFrame:
@@ -330,8 +332,8 @@ def compute_geom_corrected_dion(df_obs: pd.DataFrame) -> pd.DataFrame:
     sat_off = df_obs["PRN"].map(prn_map).fillna(0).values
 
     ant_off = np.where(
-        df_obs["ant_type"].str.startswith("STAREC"), const.d_STAREC,
-        np.where(df_obs["ant_type"].str.startswith("ALCATEL"), const.d_ALCATEL, 0)
+        df_obs["sta_ant_type"].str.startswith("STAREC"), const.d_STAREC,
+        np.where(df_obs["sta_ant_type"].str.startswith("ALCATEL"), const.d_ALCATEL, 0)
     )
 
     d_geomcorr = sat_off + ant_off

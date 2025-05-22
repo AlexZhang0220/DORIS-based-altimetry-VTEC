@@ -4,12 +4,10 @@ from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
 from pandas import Timestamp, Timedelta
 from pathlib import Path
-import os
 import re
 import time
 import pandas as pd
-
-
+import pickle
 
 def find_covering_sp3_files_from_dir(start_time: pd.Timestamp, end_time: pd.Timestamp, folder_path: str) -> list:
     
@@ -35,40 +33,51 @@ def find_covering_sp3_files_from_dir(start_time: pd.Timestamp, end_time: pd.Time
     return sorted(matching_files)
 
 def regenerate_daily_obs_with_margin(
-    start_time: Timestamp,
-    end_time: Timestamp,
+    start_time: pd.Timestamp,
+    end_time: pd.Timestamp,
     data_dir: Path,
     margin_minutes: int = 30,
 ):
     year = start_time.year
-    margin = Timedelta(minutes=margin_minutes)
+    margin = pd.Timedelta(minutes=margin_minutes)
 
-    def load_day_data(doy_val: int) -> pd.DataFrame:
-        path = data_dir / f"{year}/DOY{doy_val:03d}.parquet"
-        if not path.exists():
-            return pd.DataFrame()
-        df = pd.read_parquet(path)
-        return df
+    def load_day_data(doy: int) -> pd.DataFrame:
+        path = data_dir / f"{year}/DOY{doy:03d}.pickle"
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            return None
 
     for day in pd.date_range(start=start_time, end=end_time, freq="D"):
+        
         doy = day.dayofyear
-        df_prev = load_day_data(doy - 1)
-        df_curr = load_day_data(doy)
-        df_next = load_day_data(doy + 1)
+        prev_obs = load_day_data(doy - 1)
+        curr_obs = load_day_data(doy)
+        next_obs = load_day_data(doy + 1)
 
-        if df_curr.empty:
-            continue 
+        if curr_obs is None or curr_obs.storage.empty:
+            continue
 
-        df_all = pd.concat([df_prev, df_curr, df_next], ignore_index=True)
-        df_all = df_all.sort_values("obs_epoch")
+        all_data = pd.concat([
+            prev_obs.storage if prev_obs else pd.DataFrame(),
+            curr_obs.storage,
+            next_obs.storage if next_obs else pd.DataFrame()
+        ], ignore_index=True)
 
-        start_window = day - margin
-        end_window = day + Timedelta(days=1) + margin
+        df_window = all_data[
+            (all_data["obs_epoch"] >= day - margin) &
+            (all_data["obs_epoch"] < day + pd.Timedelta(days=1) + margin)
+        ].sort_values(by=["station_code", "obs_epoch"])
 
-        df_with_margin = df_all[(df_all["obs_epoch"] >= start_window) & (df_all["obs_epoch"] < end_window)]
+        new_obs = DORISStorage()
+        new_obs.storage = df_window
+        new_obs.stations = curr_obs.stations
 
-        save_path = data_dir / f"{year}/DOY{doy:03d}.parquet"
-        df_with_margin.to_parquet(save_path, index=False, engine="pyarrow")
+        out_path = data_dir / f"{year}/DOY{doy:03d}.pickle"
+        with open(out_path, "wb") as f:
+            pickle.dump(new_obs, f)
+
 
 if __name__ == '__main__':
 
@@ -99,9 +108,11 @@ if __name__ == '__main__':
         obs = DORISStorage()
         file = f'./DORISInput/rinexobs/ja3rx{str(year)[-2:]}{doy:03d}.001'
         obs.read_rinex_300(file, orbit, stations)
-        obs.storage.to_parquet(obs_dir / f"{year}/DOY{doy:03d}.parquet", engine="pyarrow", index=False)
+        with open(obs_dir / f"{year}/DOY{doy:03d}.pickle", "wb") as f:
+            pickle.dump(obs, f)
 
     regenerate_daily_obs_with_margin(start_dt, end_dt, obs_dir, margin_minutes=30)
+
 
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
 

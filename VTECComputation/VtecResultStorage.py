@@ -1,5 +1,5 @@
 from ObjectClasses import DORISObs, Thresholds
-from ReceiverOffset import compute_sat_clock_corrections
+from ReceiverOffsetFast import compute_sat_clock_corrections
 from CycleSlipDetection import detect_passes
 from ObjectClasses import PassObj
 from tools import GIMInpo
@@ -12,7 +12,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import groupby, cycle
-import pandas as pd
+import pickle
 
 def split_and_filter_by_time_gap(station_obs: list[DORISObs], settings: Thresholds) -> list[PassObj]:
     passes = []
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     year = 2024
     month = 5
     day = 8
-    proc_days = 30
+    proc_days = 1
     max_dion_gap = 0.015
     min_obs_count = 30
     max_obs_epoch_gap = 9
@@ -150,14 +150,14 @@ if __name__ == '__main__':
         process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
         doy = process_epoch.dayofyear
 
-        with open(f'./DORISObsStorage/pandas/{year}/DOY{doy:03d}.parquet', 'rb') as path:
-            obs = pd.read_parquet(path)
+        with open(f'./DORISObsStorage/pandas/{year}/DOY{doy:03d}.pickle', 'rb') as path:
+            obs = pickle.load(path)
 
         sat_clock_offset = compute_sat_clock_corrections(process_epoch, obs)
         
         pass_list= []
-        for station_obs in obs.storage:
-            passes, elev, diff_res = detect_passes(station_obs, sat_clock_offset, min_obs_count)
+        for station_code, grouped_obs in obs.storage.groupby('station_code'):
+            passes, elev, diff_res = detect_passes(grouped_obs, min_obs_count)
             pass_list.extend(passes)
         
         print(np.sum([len(passes.STEC) for passes in pass_list if len(passes.STEC) >= 30]))

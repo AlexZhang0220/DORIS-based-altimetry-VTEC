@@ -5,6 +5,7 @@ AE84  =         6378137.0                       #earth radius [m]
 FLAT84  =       0.00335281066474	            #flattening
 FLATINV84  =   	298.257223563
 
+ion_height =    506700
 
 d_f1	      =	 2036.25*1000000.0			    	    # frequency on L1 [hz]
 d_f2 	      =	 401.25*1000000.0			            # frequency on L2 [hz]
@@ -29,5 +30,5 @@ starec_L1_pco =  0.487
 starec_L2_pco =  0
 alcatel_L1_pco =  0.510
 alcatel_L2_pco =  0.175
-starec_iono_comb_pco = (iono_coeff * (jason3_L1_pco + starec_L1_pco) - (jason3_L2_pco + starec_L2_pco)) / (iono_coeff - 1)
-alcatel_iono_comb_pco = (iono_coeff * (jason3_L1_pco + alcatel_L1_pco) - (jason3_L2_pco + alcatel_L2_pco)) / (iono_coeff - 1)
+starec_ja3_iono_comb_pco = (iono_coeff * (jason3_L1_pco + starec_L1_pco) - (jason3_L2_pco + starec_L2_pco)) / (iono_coeff - 1)
+starec_ja3_iono_comb_pco = (iono_coeff * (jason3_L1_pco + alcatel_L1_pco) - (jason3_L2_pco + alcatel_L2_pco)) / (iono_coeff - 1)
