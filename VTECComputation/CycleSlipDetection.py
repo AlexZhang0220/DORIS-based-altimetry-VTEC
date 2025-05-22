@@ -1,7 +1,5 @@
-from ObjectClasses import DORISObs, PassObj
 import numpy as np
 import pandas as pd
-from astropy.time import Time
 import constant as const
 from scipy.stats import zscore
 import matplotlib.pyplot as plt
@@ -9,8 +7,6 @@ import matplotlib.pyplot as plt
 def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', elev_thres=10.0, max_gap_seconds=9, min_obs_count=30) -> list[pd.DataFrame]:
 
     df = df.copy()
-    # df[time_col] = pd.to_datetime(df[time_col])
-    
     df = df.sort_values(by=time_col).reset_index(drop=True)
     
     time_diff = df[time_col].diff().dt.total_seconds().fillna(0)
@@ -26,44 +22,34 @@ def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', 
             
     return final_groups
 
-def create_pass_object(observations: list[DORISObs]) -> PassObj:
-    """
-    Constructs a PassObj from a list of observations.
-    """
-    return PassObj(
-        epoch=[Time(obs.obs_epoch).mjd for obs in observations],
-        ipp_lat=[obs.ipp_lat for obs in observations],
-        ipp_lon=[obs.ipp_lon for obs in observations],
-        STEC=[obs.STEC - observations[0].STEC for obs in observations],
-        elevation=[obs.elevation for obs in observations],
-        map_value=[obs.map_value for obs in observations],
-        station_code=observations[0].station_code,
-        station_id=observations[0].station_id
-    )
+def detect_passes(obs_per_station:pd.DataFrame, min_obs_count) -> pd.DataFrame:
 
-def detect_passes(obs_per_station:pd.DataFrame, min_obs_count) -> list[PassObj]:
-    """
-    Detects satellite passes and applies cycle slip detection.
-    """
-    passes, elev_list, diff_res_list = [], [], []
-    # sat_bias, sat_shift, sat_sec_shift = satellite_clock_offsets
-    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station)
+    pass_counter = 1
+    pass_per_station = []
+
+    columns_to_keep = [
+        'obs_epoch', 'ipp_lat', 'ipp_lon',
+        'STEC', 'elevation', 'map_value',
+        'station_code'
+    ]
+
+    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station, min_obs_count=min_obs_count)
     
     if not grouped_obs_per_station:
-        return []
+        return pd.DataFrame()
     
     sta_ant_type = obs_per_station['sta_ant_type'].values[0]
     prn = obs_per_station['PRN'].values[0]
     station_freq_shift = obs_per_station['station_freq_shift'].values[0]
     
     if sta_ant_type[0:6] == 'STAREC' and prn == "L39":
-        L1_pco_offset = const.jason3_L1_pco + const.starec_sL1_pco
+        L1_pco_offset = const.jason3_L1_pco + const.starec_L1_pco
         L2_pco_offset = const.jason3_L2_pco + const.starec_L2_pco
     elif sta_ant_type[0:7] == 'ALCATEL' and prn == "L39":
         L1_pco_offset = const.jason3_L1_pco + const.alcatel_L1_pco
         L2_pco_offset = const.jason3_L2_pco + const.alcatel_L2_pco
     else:
-        return []
+        return pd.DataFrame()
     
     d_lambda1 = const.c / (5e6 * 407.25 * (1 + station_freq_shift * const.d_p_multik))
     d_lambda2 = const.c / (5e6 * 80.25 * (1 + station_freq_shift * const.d_p_multik))
@@ -103,12 +89,15 @@ def detect_passes(obs_per_station:pd.DataFrame, min_obs_count) -> list[PassObj]:
         z_scores = np.abs(zscore(diff_residuals))
     
         if np.max(np.abs(diff_residuals)) > 10:
-            split_points = np.where(z_scores > 3)[0] + 1
+            split_points = np.where(z_scores > 3)[0] + 1 
+            # We do not detect where diff_residuals > 5 here,
+            # because a single abnormal cycle slip can shift the entire residual series away from zero.
+
         else:
             split_points = np.array([], dtype=int)
 
         split_points = np.hstack(([0], split_points, [len(estimated_cycle_slip)]))
-
+                
         for i in range(len(split_points) - 1):
             start, end = split_points[i], split_points[i+1]
             if end - start < min_obs_count:
@@ -124,15 +113,19 @@ def detect_passes(obs_per_station:pd.DataFrame, min_obs_count) -> list[PassObj]:
             residuals_sub = y_sub - X_sub @ beta_sub
             diff_res_sub = np.diff(residuals_sub)
 
-            jump_idx = np.where(diff_res_sub > 3.5)[0] + 1
+            jump_idx = np.where(np.abs(diff_res_sub) > 3.5)[0] + 1
             jump_idx = np.hstack(([0], jump_idx, [len(y_sub)]))
 
             for j in range(len(jump_idx) - 1):
                 seg_start = start + jump_idx[j]
                 seg_end = start + jump_idx[j + 1]
                 if seg_end - seg_start >= min_obs_count:
-                    seg = grouped_obs.iloc[seg_start:seg_end]
-                    passes.append(create_pass_object(seg[['obs_epoch', 'ipp_lat', 'ipp_lon',
-                                                        'STEC', 'elevation', 'map_value',
-                                                        'station_code', 'station_id']].values.tolist()))
-                
+                    seg = grouped_obs.iloc[seg_start:seg_end][columns_to_keep].copy()
+                    seg['pass_id'] = pass_counter
+                    pass_per_station.append(seg)
+                    pass_counter += 1
+
+    if pass_per_station:
+        return pd.concat(pass_per_station, ignore_index=True)
+    else:
+        return pd.DataFrame()     

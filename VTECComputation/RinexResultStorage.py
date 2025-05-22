@@ -83,14 +83,11 @@ if __name__ == '__main__':
 
     start_time = time.time()
 
-    year = 2024
-    month = 5
-    day = 8
+    year, month, day = 2024, 5, 8
     proc_days = 30
+    
     start_dt = Timestamp(year, month, day)
     end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days - 1)
-
-    settings = Thresholds(max_dion_gap=None, max_obs_epoch_gap=None, min_obs_count=None, ele_cut_off=0) 
 
     file = './DORISInput/sinex/dpod2020_031.snx'
     stations = StationStorage()
