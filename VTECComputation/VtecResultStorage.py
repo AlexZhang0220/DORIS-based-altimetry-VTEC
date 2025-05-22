@@ -1,8 +1,4 @@
-# from rinex reading results to VTEC results, 
-# including passdetection (cycle slip detection) and VTEC leveling
 from ObjectClasses import DORISObs, Thresholds
-from ReceiverOffset import compute_sat_clock_corrections
-# from PassDetection import detect_passes
 from CycleSlipDetection import detect_passes
 from ObjectClasses import PassObj
 from tools import GIMInpo
@@ -10,14 +6,12 @@ from readFile import read_ionFile
 from joblib import Parallel, delayed
 from pandas import Timestamp, Timedelta
 from astropy.time import Time
-from OrbitStorage import OrbitStorage
-from RinexResultStorage import find_sp3_files
 import h5py
 import time
 import numpy as np
-import pickle
 import matplotlib.pyplot as plt
 from itertools import groupby, cycle
+import pickle
 
 def split_and_filter_by_time_gap(station_obs: list[DORISObs], settings: Thresholds) -> list[PassObj]:
     passes = []
@@ -138,13 +132,13 @@ def elevation_noise(station_obs: list[DORISObs], settings: Thresholds) -> list[P
     return elevation, dd_noise
 
 if __name__ == '__main__':
-        # COMPARISON OF SAME STATION AT QUIET AND ACTIVE CASES TO SEE if there is any DIFFERENCES
+
     start_time = time.time()
 
     year = 2024
     month = 5
     day = 8
-    proc_days = 10
+    proc_days = 1
     max_dion_gap = 0.015
     min_obs_count = 30
     max_obs_epoch_gap = 9
@@ -155,14 +149,14 @@ if __name__ == '__main__':
         process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
         doy = process_epoch.dayofyear
 
-        with open(f'./DORISObsStorage/{year}/DOY{doy:03d}.pkl', 'rb') as file:
-            obs = pickle.load(file)
+        with open(f'./DORISObsStorage/{year}/DOY{doy:03d}.pkl', 'rb') as path:
+            obs = pickle.load(path)
 
-        sat_clock_offset = compute_sat_clock_corrections(process_epoch, obs)
+ 
         
         pass_list= []
-        for station_obs in obs.storage:
-            passes, elev, diff_res = detect_passes(station_obs, sat_clock_offset, min_obs_count)
+        for grouped_obs in obs.storage:
+            passes, elev, diff_res = detect_passes(grouped_obs, min_obs_count)
             pass_list.extend(passes)
         
         print(np.sum([len(passes.STEC) for passes in pass_list if len(passes.STEC) >= 30]))
@@ -181,7 +175,7 @@ if __name__ == '__main__':
         # Vtec Std of the window Number of obs in the window
         Passh5 = f'./DORISVTEC/{year}/DOY{doy:03d}.h5'
         with h5py.File(Passh5, 'w') as f:
-            setting_group = f.require_group(f'y{year}/{doy:03d}/count{min_obs_count}')
+            setting_group = f.require_group(f'y{year}/{doy:03d}')
             
             for index, arc in enumerate(pass_list):
                 group_name = f'pass{index}-{arc.station_code}'

@@ -51,7 +51,7 @@ def create_pass_object(observations: list[DORISObs]) -> PassObj:
         station_id=observations[0].station_id
     )
 
-def detect_passes(station_obs: list[DORISObs], satellite_clock_offsets: list[float], min_obs_count) -> list[PassObj]:
+def detect_passes(station_obs: list[DORISObs], min_obs_count) -> list[PassObj]:
     """
     Detects satellite passes and applies cycle slip detection.
     """
