@@ -1,4 +1,3 @@
-from ObjectClasses import Thresholds
 from ObsStorage import DORISStorage
 from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
@@ -78,6 +77,7 @@ def regenerate_daily_obs_with_margin(
         with open(out_path, "wb") as f:
             pickle.dump(new_obs, f)
 
+satellite_list = ['ja2', 'ja3', 's3a', 's3b', 'srl']
 
 if __name__ == '__main__':
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
 
     year, month, day = 2024, 5, 8
     proc_days = 30
-    
+    proc_sate = satellite_list[1]
     start_dt = Timestamp(year, month, day)
     end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days - 1)
 
@@ -97,19 +97,18 @@ if __name__ == '__main__':
     matching_sp3 = find_covering_sp3_files_from_dir(start_dt, end_dt, sp3_dir)
     orbit = OrbitStorage(matching_sp3)
     
-    obs_dir = Path("./DORISObsStorage/pandas")
+    obs_dir = Path("./DORISObsStorage/" + proc_sate)
     for i in range(proc_days):
         process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
         doy = process_epoch.dayofyear
 
         obs = DORISStorage()
-        file = f'./DORISInput/rinexobs/ja3rx{str(year)[-2:]}{doy:03d}.001'
+        file = f'./DORISInput/rinexobs/{proc_sate}rx{str(year)[-2:]}{doy:03d}.001'
         obs.read_rinex_300(file, orbit, stations)
         with open(obs_dir / f"{year}/DOY{doy:03d}.pickle", "wb") as f:
             pickle.dump(obs, f)
 
     regenerate_daily_obs_with_margin(start_dt, end_dt, obs_dir, margin_minutes=30)
-
 
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
 

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import constant as const
 from scipy.stats import zscore
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', elev_thres=10.0, max_gap_seconds=9, min_obs_count=30) -> list[pd.DataFrame]:
 
@@ -22,18 +22,13 @@ def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', 
             
     return final_groups
 
-def detect_passes(obs_per_station:pd.DataFrame, min_obs_count) -> pd.DataFrame:
+def detect_passes(obs_per_station:pd.DataFrame, min_obs_count, columns_to_keep) -> pd.DataFrame:
 
     pass_counter = 1
     pass_per_station = []
 
-    columns_to_keep = [
-        'obs_epoch', 'ipp_lat', 'ipp_lon',
-        'STEC', 'elevation', 'map_value',
-        'station_code'
-    ]
-
-    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station, min_obs_count=min_obs_count)
+    # divide the observations to groups according to max_gap_seconds
+    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station, max_gap_seconds = 9, min_obs_count=min_obs_count)
     
     if not grouped_obs_per_station:
         return pd.DataFrame()

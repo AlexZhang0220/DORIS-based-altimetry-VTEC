@@ -1,10 +1,6 @@
 import numpy as np
-import constant
-from typing import List, Dict, Tuple
 import math
-from pandas import Timestamp
-from pyproj import Transformer
-from astropy.time import Time
+import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 from numba import njit
 
@@ -24,39 +20,27 @@ def batch_lagrange_interp_1d(x_known, y_known, x_interp):
         result[j] = total
     return result
 
-def GIMInpo(GIMVTEC: list[float], IPPEpoch: Timestamp, IPPLat: list[float], IPPLon: list[float]) -> list[float]: 
-# function computes GIM VTEC values at (IPPlat, IPPlon) which are taken at IPPepoch
-# input:
-#   GIMVTEC   GIM VTEC values for the given day, note THE LAT IS ALREADY FROM -87.5 TO 87.5!!
-#   IPPEpoch  Epoch in Timestamp
-#   IPPLat    Latitude in degrees
-#   IPPLon    Longitude in degrees, (-180,180)
-# output:
-#   IPPVTEC   Interpolated VTEC value at the epoch and (lat, lon)
+def get_igs_vtec(GIMVTEC: list[np.ndarray], df_max: pd.DataFrame) -> np.ndarray:
+    MaxLatIndex, MaxLonIndex = 71, 73
 
-    MaxLatIndex = 71 #int( - lat_start * 2 / lat_grid_interval + 1) 
-    MaxLonIndex = 73 #int( - lon_start * 2 / lon_grid_interval + 1)
+    inpo_funcs = [
+        RegularGridInterpolator((range(MaxLatIndex), range(MaxLonIndex)), GIMVTEC[i], method="linear")
+        for i in range(13)
+    ]
+
+    lat_idx = (df_max['ipp_lat'] + 87.5) / 2.5
+    lon_idx = (df_max['ipp_lon'] + 180) / 5
+
+    epoch = pd.to_datetime(df_max['obs_epoch'])
+    t_idx = epoch.dt.hour // 2
+    t_scale = ((epoch.dt.hour + epoch.dt.minute / 60 + epoch.dt.second / 3600) % 2) / 2
+
+    coords = np.stack([lat_idx, lon_idx], axis=1)
+
+    vtec1 = np.array([inpo_funcs[i]([pt])[0] for i, pt in zip(t_idx, coords)])
+    vtec2 = np.array([inpo_funcs[i+1]([pt])[0] for i, pt in zip(t_idx, coords)])
     
-    # space interpolation function list for the day 
-    InpoFunc = []
-    for i in range(13):
-        InpoFunc.append(RegularGridInterpolator((list(range(0, MaxLatIndex)), list(range(0, MaxLonIndex))),
-                GIMVTEC[i], method='linear'))
-        
-    IPPGIMVTEC = []
-    for i in range(len(IPPEpoch)):
-        IPPLatIndex = (IPPLat[i] + 87.5) / 2.5
-        IPPLonIndex = (IPPLon[i] + 180) / 5
-
-        IPPEpochIndex = IPPEpoch[i].hour // 2
-        IPPEpochScale = ((IPPEpoch[i].hour + IPPEpoch[i].minute / 60.0 + IPPEpoch[i].second / 3600.0) % 2) / 2
-        # IPPEpochScale: the percent this epoch has went through in the 2-hour period
-
-        # linear interpolation in time
-        IPPGIMVTEC.append((1 - IPPEpochScale) * InpoFunc[IPPEpochIndex]([IPPLatIndex, IPPLonIndex])[0]\
-              + IPPEpochScale * InpoFunc[IPPEpochIndex + 1]([IPPLatIndex, IPPLonIndex])[0])
-        
-    return IPPGIMVTEC
+    return (1 - t_scale) * vtec1 + t_scale * vtec2
 
 def trop_saa(pos, elev, humi):
     """

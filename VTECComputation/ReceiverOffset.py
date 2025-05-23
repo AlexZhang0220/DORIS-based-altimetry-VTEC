@@ -1,45 +1,61 @@
 from pandas import Timestamp
 from ObsStorage import DORISStorage
-from StationOffset import process_station_observations
 import constant as const
 import numpy as np
 
 def compute_sat_clock_corrections(process_epoch: Timestamp, obs: DORISStorage):
-    _, T0_sec_stamp = process_station_observations(obs.storage[0])
-    doy, year = process_epoch.dayofyear, process_epoch.year   
-    # Extract reference station data
-    time_ref_station, station_bias, station_shift = zip(*[
-        (s.station_code, s.time_bias * 1e-6, s.time_shift * 1e-14)
+
+    prn = obs.storage["PRN"].values[0]
+    if prn == "L39":
+        pco = const.starec_ja3_iono_comb_pco
+
+    station_time_dict = {
+        s.station_code: (s.time_bias * 1e-6, s.time_shift * 1e-14)
         for s in obs.stations if s.time_ref_bit
-    ]) if obs.stations else ([], [], [])
+    } if obs.stations else {}
 
-    equation_left, equation_right_epoch = [], []
-    for station_obs in obs.storage:
-        if not station_obs or station_obs[0].station_code not in time_ref_station:
-            continue
-        
-        index = time_ref_station.index(station_obs[0].station_code)
-        station_clock_bias = station_bias[index]
-        
-        for obs_this_epoch in station_obs:
-            if abs(obs_this_epoch.C1 - obs_this_epoch.C2) > 10000 or obs_this_epoch.obs_epoch.second % 10 != T0_sec_stamp:
-                continue
+    df_obs = obs.storage
+    df_filtered = df_obs[df_obs["station_code"].isin(station_time_dict.keys())].sort_values(by=["station_code", "obs_epoch"]).reset_index(drop=True)
 
-            station_pseudo_iono = (obs_this_epoch.C1 * const.iono_coeff - obs_this_epoch.C2) / (const.iono_coeff - 1)
-            sec_from_start_to_epoch_rinex = (obs_this_epoch.obs_epoch - process_epoch).total_seconds()
+    df_filtered["epoch_diff_sec"] = (
+        df_filtered.groupby("station_code")["obs_epoch"]
+        .diff().dt.total_seconds()
+    )
 
-            epoch_tai = obs_this_epoch.obs_epoch
-            elev = obs_this_epoch.elevation
+    df_7s_gap = df_filtered[
+        (df_filtered["epoch_diff_sec"] >= 6) & (df_filtered["epoch_diff_sec"] <= 8)
+    ]
 
-            geom_dis = (
-                np.linalg.norm(obs_this_epoch.pos_sat_cele - obs_this_epoch.pos_sta_cele)
-                - const.starec_iono_comb_pco * np.sin(np.deg2rad(elev))
-                + 2.47 / (np.sin(np.deg2rad(elev)) + 0.0121)  # Tropospheric delay
-            )
-            clock_station_bias = station_clock_bias + station_shift[index] * (sec_from_start_to_epoch_rinex - station_pseudo_iono / const.c)
+    df_pseudo_iono_good = df_7s_gap[(df_7s_gap["C1"] - df_7s_gap["C2"]).abs() < 10000]
 
-            equation_left.append((station_pseudo_iono - geom_dis - const.c * clock_station_bias) / const.c)
-            equation_right_epoch.append((epoch_tai - process_epoch).total_seconds())
-      
-    sat_sec_shift, sat_shift, sat_bias = np.polyfit(equation_right_epoch, equation_left, 2)
+    ds_pseudo_iono = (
+        df_pseudo_iono_good["C1"] * const.iono_coeff - df_pseudo_iono_good["C2"]
+    ) / (const.iono_coeff - 1)
+
+    ds_sec_diff = (df_pseudo_iono_good["obs_epoch"] - process_epoch).dt.total_seconds()
+
+    ds_station_shift_tuples = df_pseudo_iono_good["station_code"].map(station_time_dict)
+    ds_time_bias_values = ds_station_shift_tuples.str[0]
+    ds_time_shift_values = ds_station_shift_tuples.str[1]
+
+    ds_clock_station_bias = ds_time_bias_values + ds_time_shift_values * (
+        ds_sec_diff - ds_pseudo_iono / const.c
+    )
+
+    geom_vec = np.sqrt(
+        (df_pseudo_iono_good["sat_x"] - df_pseudo_iono_good["sta_x"])**2 +
+        (df_pseudo_iono_good["sat_y"] - df_pseudo_iono_good["sta_y"])**2 +
+        (df_pseudo_iono_good["sat_z"] - df_pseudo_iono_good["sta_z"])**2
+    )
+    elev_rad = np.deg2rad(df_pseudo_iono_good["elevation"])
+    ds_geom_dis = (
+        geom_vec
+        - pco * np.sin(elev_rad)
+        + 2.47 / (np.sin(elev_rad) + 0.0121) # tropospheric delay model
+    )
+   
+    ds_clock_time = (ds_pseudo_iono - ds_geom_dis - const.c * ds_clock_station_bias) / const.c
+ 
+    sat_sec_shift, sat_shift, sat_bias = np.polyfit(ds_sec_diff, ds_clock_time, 2)
+
     return sat_bias, sat_shift, sat_sec_shift

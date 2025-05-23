@@ -1,5 +1,3 @@
-
-
 c 	=			299792458	                    #speed of light [m/s]
 AE84  =         6378137.0                       #earth radius [m]
 FLAT84  =       0.00335281066474	            #flattening
@@ -20,8 +18,7 @@ d_geomcorrSar =  0.158								    # geometrical correction Saral [m]
 d_STAREC      =  0.487									# STAREC Antenna
 d_ALCATEL     =  0.175									# ALCATEL Antenna
 d_k	          =	 (d_f2**2)/((d_f2**2)-(d_f1**2))	    # L4 frequency factor 
-d_w 	      =	 (d_f1**2)/(40.3)			            # dion [range] * w	= TEC;、
-
+d_w 	      =	 (d_f1**2)/(40.3)			            # dion [range] * w	= TEC;
 
 iono_coeff    =  (d_f1 / d_f2) ** 2
 jason3_L1_pco =  0.315
