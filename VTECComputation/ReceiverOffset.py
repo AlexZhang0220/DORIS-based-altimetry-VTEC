@@ -3,6 +3,7 @@ from ObsStorage import DORISStorage
 import constant as const
 import numpy as np
 
+# only use is to calculate satellte clock offset; not used in main program
 def compute_sat_clock_corrections(process_epoch: Timestamp, obs: DORISStorage):
 
     prn = obs.storage["PRN"].values[0]

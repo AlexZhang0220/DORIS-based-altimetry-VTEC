@@ -1,12 +1,13 @@
 from ObsStorage import DORISStorage
-from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
 from pandas import Timestamp, Timedelta
 from pathlib import Path
 import re
 import time
-import pandas as pd
 import pickle
+import pandas as pd
+import georinex as gr
+import xarray as xr
 
 def find_covering_sp3_files_from_dir(start_time: pd.Timestamp, end_time: pd.Timestamp, folder_path: str) -> list:
     
@@ -93,9 +94,14 @@ if __name__ == '__main__':
     stations = StationStorage()
     stations.read_sinex(file, start_dt, end_dt)
 
+    # no need for a whole class to read in sp3 file, only orbit data
     sp3_dir = "./DORISInput/sp3"
     matching_sp3 = find_covering_sp3_files_from_dir(start_dt, end_dt, sp3_dir)
-    orbit = OrbitStorage(matching_sp3)
+    sp3_file_list = []
+    for file in matching_sp3:
+        sp3_file = gr.load(file) 
+        sp3_file_list.append(sp3_file)
+    orbit_data = xr.concat(sp3_file_list, dim="time")
     
     obs_dir = Path("./DORISObsStorage/" + proc_sate)
     for i in range(proc_days):
@@ -104,7 +110,7 @@ if __name__ == '__main__':
 
         obs = DORISStorage()
         file = f'./DORISInput/rinexobs/{proc_sate}rx{str(year)[-2:]}{doy:03d}.001'
-        obs.read_rinex_300(file, orbit, stations)
+        obs.read_rinex_300(file, orbit_data, stations)
         with open(obs_dir / f"{year}/DOY{doy:03d}.pickle", "wb") as f:
             pickle.dump(obs, f)
 

@@ -1,4 +1,3 @@
-from typing import List, Dict, Tuple
 from ObjectClasses import Station
 from pandas import Timestamp, Timedelta
 import bisect
@@ -6,7 +5,7 @@ import numpy as np
 
 class StationStorage:
     def __init__(self) -> None:
-        self.storage: List[Station] = []
+        self.storage: list[Station] = []
     @staticmethod
     def parse_custom_time(time_str: str) -> Timestamp:
         """
@@ -92,7 +91,7 @@ class StationStorage:
         Parses station coordinates from records and directly stores them in the corresponding Station instance.
         Only updates stations whose solution index is in soln_idx.
 
-        :param records: List of strings, each representing a coordinate record.
+        :param records: list of strings, each representing a coordinate record.
         """
         i = 0
         while i < len(records):
@@ -136,7 +135,7 @@ class StationStorage:
         """
         desired_sections = {"SOLUTION/EPOCHS", "SITE/ANTENNA", "SOLUTION/ESTIMATE"}
         found_sections = set()  # Track sections already processed
-        sections = {}  # Dict[str, List[str]]
+        sections = {}  # Dict[str, list[str]]
         current_section = None
         current_lines = []
 

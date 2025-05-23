@@ -1,5 +1,4 @@
-from typing import List
-from ObjectClasses import  DORISBeacon
+from ObjectClasses import DORISBeacon
 from OrbitStorage import OrbitStorage
 from StationStorage import StationStorage
 from tools import batch_lagrange_interp_1d
@@ -14,16 +13,16 @@ import warnings
 from dataclasses import dataclass
 @dataclass
 class RINEXHeaderInfo:
-    obs_type: List[str]
-    stations: List[DORISBeacon]
+    obs_type: list[str]
+    stations: list[DORISBeacon]
     PRN: str
 
 class DORISStorage:
     def __init__(self) -> None:
         self.storage = pd.DataFrame()
-        self.stations: List[DORISBeacon] = []
+        self.stations: list[DORISBeacon] = []
 
-    def read_rinex_300(self, file: str, orbit_data: OrbitStorage, station_data: StationStorage):
+    def read_rinex_300(self, file: str, orbit_data: xr.Dataset, station_data: StationStorage):
         
         # header
         header_info = self._parse_and_extract_header_info(file)
@@ -38,7 +37,7 @@ class DORISStorage:
 
         df_obs = (
             _parse_lines_chunk_df(lines, header_info.obs_type, header_info.PRN, self.stations)
-            .pipe(interpolate_satellite_positions_lagrange, orbit_data.sat_dataset, header_info.PRN)
+            .pipe(interpolate_satellite_positions_lagrange, orbit_data, header_info.PRN)
             .pipe(merge_station_position, station_data.storage)
             .pipe(get_elevation_and_map_value) 
             .pipe(get_ipp_position)
