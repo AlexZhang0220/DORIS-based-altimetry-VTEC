@@ -1,6 +1,6 @@
-c 	=			299792458	                    #speed of light [m/s]
-AE84  =         6378137.0                       #earth radius [m]
-FLAT84  =       0.00335281066474	            #flattening
+c 	       =	299792458	                    #speed of light [m/s]
+AE84       =    6378137.0                       #earth radius [m]
+FLAT84     =    0.00335281066474	            #flattening
 FLATINV84  =   	298.257223563
 
 ion_height =    506700

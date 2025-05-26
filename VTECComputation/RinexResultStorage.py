@@ -1,6 +1,5 @@
 from ObsStorage import DORISStorage
 from StationStorage import StationStorage
-from pandas import Timestamp, Timedelta
 from pathlib import Path
 import re
 import time
@@ -87,8 +86,8 @@ if __name__ == '__main__':
     year, month, day = 2024, 5, 8
     proc_days = 30
     proc_sate = satellite_list[1]
-    start_dt = Timestamp(year, month, day)
-    end_dt = Timestamp(year, month, day) + Timedelta(days=proc_days - 1)
+    start_dt = pd.Timestamp(year, month, day)
+    end_dt = pd.Timestamp(year, month, day) + pd.Timedelta(days=proc_days - 1)
 
     file = './DORISInput/sinex/dpod2020_031.snx'
     stations = StationStorage()
@@ -105,13 +104,16 @@ if __name__ == '__main__':
     
     obs_dir = Path("./DORISObsStorage/" + proc_sate)
     for i in range(proc_days):
-        process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
+        process_epoch = pd.Timestamp(year, month, day) + pd.Timedelta(days=i)
         doy = process_epoch.dayofyear
 
         obs = DORISStorage()
         file = f'./DORISInput/rinexobs/{proc_sate}rx{str(year)[-2:]}{doy:03d}.001'
         obs.read_rinex_300(file, orbit_data, stations)
-        with open(obs_dir / f"{year}/DOY{doy:03d}.pickle", "wb") as f:
+
+        output_path = Path(obs_dir) / f"{year}/DOY{doy:03d}.pickle"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "wb") as f:
             pickle.dump(obs, f)
 
     regenerate_daily_obs_with_margin(start_dt, end_dt, obs_dir, margin_minutes=30)

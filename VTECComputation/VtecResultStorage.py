@@ -1,7 +1,6 @@
 from CycleSlipDetection import detect_passes
 from tools import get_igs_vtec
 from readFile import read_ionFile
-from pandas import Timestamp, Timedelta
 import time
 import pandas as pd
 import pickle
@@ -38,7 +37,7 @@ if __name__ == '__main__':
     ]
 
     for i in range(proc_days):
-        process_epoch = Timestamp(year, month, day) + Timedelta(days=i)
+        process_epoch = pd.Timestamp(year, month, day) + pd.Timedelta(days=i)
         doy = process_epoch.dayofyear
 
         ## read in rinex-reading results
@@ -84,6 +83,7 @@ if __name__ == '__main__':
 
         ## storage of pass with VTEC into file
         pass_file_name = f'./DORISVTECStorage/pandas/{proc_sate}/{year}/DOY{doy:03d}.pickle'
+        pass_file_name.parent.mkdir(parents=True, exist_ok=True)
         with open(pass_file_name, "wb") as f:
             pickle.dump(pass_all_station_processed, f)
 
