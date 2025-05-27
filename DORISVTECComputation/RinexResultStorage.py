@@ -64,6 +64,8 @@ def regenerate_daily_obs_with_margin(
             next_obs.storage if next_obs else pd.DataFrame()
         ], ignore_index=True)
 
+        all_data = all_data.drop_duplicates().reset_index(drop=True)
+
         df_window = all_data[
             (all_data["obs_epoch"] >= day - margin) &
             (all_data["obs_epoch"] < day + pd.Timedelta(days=1) + margin)

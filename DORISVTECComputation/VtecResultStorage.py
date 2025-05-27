@@ -1,6 +1,7 @@
 from CycleSlipDetection import detect_passes
 from tools import get_igs_vtec
 from readFile import read_ionFile
+from pathlib import Path
 import time
 import pandas as pd
 import pickle
@@ -27,7 +28,7 @@ if __name__ == '__main__':
     year, month, day = 2024, 5, 8
     proc_days = 30
     proc_sate = satellite_list[1]
-    min_obs_count = 30
+    min_obs_count = 30 # minimum obs count requirement for a pass
     range_ratio = range_ratio_list[0]
 
     columns_to_keep = [
@@ -41,7 +42,7 @@ if __name__ == '__main__':
         doy = process_epoch.dayofyear
 
         ## read in rinex-reading results
-        with open(f'./DORISObsStorage/pandas/{proc_sate}/{year}/DOY{doy:03d}.pickle', 'rb') as path:
+        with open(f'./DORISObsStorage/{proc_sate}/{year}/DOY{doy:03d}.pickle', 'rb') as path:
             obs = pickle.load(path)
 
         # sat_clock_offset = compute_sat_clock_corrections(process_epoch, obs)
@@ -82,7 +83,7 @@ if __name__ == '__main__':
         pass_all_station_processed = pd.concat(corrected_passes, ignore_index=True)
 
         ## storage of pass with VTEC into file
-        pass_file_name = f'./DORISVTECStorage/pandas/{proc_sate}/{year}/DOY{doy:03d}.pickle'
+        pass_file_name = Path(f'./DORISVTECStorage/{proc_sate}/{year}/DOY{doy:03d}.pickle')
         pass_file_name.parent.mkdir(parents=True, exist_ok=True)
         with open(pass_file_name, "wb") as f:
             pickle.dump(pass_all_station_processed, f)
