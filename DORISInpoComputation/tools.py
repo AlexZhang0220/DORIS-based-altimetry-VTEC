@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import pandas as pd
+import constant
 from scipy.interpolate import RegularGridInterpolator
 from numba import njit
 
@@ -46,6 +47,28 @@ def get_igs_vtec(GIMVTEC: list[np.ndarray], df_ipp: pd.DataFrame) -> np.ndarray:
     vtec2 = np.array([inpo_funcs[i+1]([pt])[0] for i, pt in zip(t_idx, coords)])
     
     return (1 - t_scale) * vtec1 + t_scale * vtec2
+
+def haversine_vec(lat1, lon1, lat2_array, lon2_array, R=constant.AE84+506700):
+    phi1 = np.radians(lat1)
+    phi2 = np.radians(lat2_array)
+    dphi = np.radians(lat2_array - lat1)
+    dlambda = np.radians(lon2_array - lon1)
+    a = np.sin(dphi / 2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2)**2
+    return 2 * R * np.arcsin(np.sqrt(a))
+
+def idw(distances, values, power=2):
+
+    distances = np.asarray(distances)
+    values = np.asarray(values)
+# 
+    if np.any(distances == 0):
+        return values[distances == 0][0]
+
+    weights = 1 / distances**power
+    weighted_sum = np.sum(weights * values)
+    sum_weights = np.sum(weights)
+
+    return weighted_sum / sum_weights
 
 def trop_saa(pos, elev, humi):
     """

@@ -8,9 +8,8 @@ from tools import get_igs_vtec
 from readFile import read_ionFile
 # import matplotlib.pyplot as plt
 
-def haversine(lon1, lat1, lon2, lat2):
+def haversine(lon1, lat1, lon2, lat2, R = const.AE84 / 1000 + 506.7):
 
-    R = const.AE84 / 1000 # 地球半径 (km)
     lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
     dlat = lat2 - lat1
@@ -34,10 +33,10 @@ def compute_roti_for_alt_point(df_doris_nearby):
         times = group_sorted['obs_epoch'].values.astype('datetime64[s]').astype(float)
         
         if len(vtec_values) < 2:
-            continue  # 不够点跳过
+            continue  
         
         dvtec = np.abs(np.diff(vtec_values))
-        dt_min = np.diff(times) / 60  # 秒转分钟
+        dt_min = np.diff(times) / 60  
         rate = dvtec / dt_min
         rates.extend(rate)
     
