@@ -629,6 +629,7 @@ def read_sp3File(sp3file):
     f.close() # close the file
     # ------------------------------------------------------------------
     end = time.time()
+    print('{}'.format(sp3file), 'file is read in', '{0:.2f}'.format(end-start), 'seconds')
     return position
 
 #-------------------------------------------------------------------------
@@ -705,7 +706,6 @@ def read_ionFile(IonFile):
     # check if observationFile exists or not
     isexist(IonFile)
     # ----------------------------------------------
-    start = time.time()  
     f = open(IonFile, errors = 'ignore')
     obsLines = f.readlines() 
 
@@ -739,49 +739,5 @@ def read_ionFile(IonFile):
         del obsLines[0]
         #---------------------------------------------------------------------------------------
     f.close() # close the file
-    finish = time.time()
-
-    return tecuList
-
-def read_ionRMSFile(IonFile):
-    """ Function that reads Ionosphere file """
-    # check if observationFile exists or not
-    isexist(IonFile)
-    # ----------------------------------------------
-    start = time.time()  
-    f = open(IonFile, errors = 'ignore')
-    obsLines = f.readlines() 
-
-    line = 0
-    while True:
-        if '    13                                                      END OF TEC MAP' in obsLines[line]:
-            line +=1
-            break
-        else:
-            line +=1
-    
-    del obsLines[0:line]
-    # --------------------------------------------------------------------------------------
-    tecRMSList = np.zeros([13, 71, 73])
-    for etime in range(13):
-        line = 0
-        del obsLines[0] # start of tec map
-        epochLine = obsLines[0].split()
-        epoch = datetime.datetime(year = int(epochLine[0]), month = int(epochLine[1]), day = int(epochLine[2]), 
-                                            hour = int(epochLine[3]), minute = int(epochLine[4]), second = int(epochLine[5]))
-        del obsLines[0] # delete epoch line
-        for phi in range(71):
-            temp = obsLines[0].split()
-            LAT, LON1, LON2, DLON, H = temp[0], temp[1], temp[2], temp[3], temp[4]
-            tecu = obsLines[1] + obsLines[2] + obsLines[3] + obsLines[4] + obsLines[5]
-            tecu = tecu.split()
-            tecu = [int(tec) for tec in tecu]
-            for lamda in range(len(tecu)):
-                tecRMSList[etime,phi,lamda] = tecu[lamda]
-            del obsLines[0:6]
-        del obsLines[0]
-        #---------------------------------------------------------------------------------------
-    f.close() # close the file
-    finish = time.time()
     # print("Ionosphere file ", IonFile," is read in", "{0:.2f}".format(finish-start), "seconds.")
-    return tecRMSList
+    return tecuList
