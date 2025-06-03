@@ -9,7 +9,7 @@ d_f1	      =	 2036.25*1000000.0			    	    # frequency on L1 [hz]
 d_f2 	      =	 401.25*1000000.0			            # frequency on L2 [hz]
 d_lambda1 	  =	 c/d_f1							        # wavelength of L1 [m] = 0.147m
 d_lambda2 	  =	 c/d_f2							        # wavelength on L2 [m] = 0.747m
-d_p_multik    =  4/3*(87.0/5/2**26)                      # correction base for time frequency shift
+d_p_multik    =  4/3*(87.0/5/2**26)                     # correction base for time frequency shift
 d_geomcorrJa2 =	 0.164						            # geometrical correction Jason-2 [m]
 d_geomcorrJa3 =	 0.168						            # geometrical correction Jason-3 [m]
 d_geomcorrCr2 =  0.1538							        # geometrical correction Cryosat-2 [m]

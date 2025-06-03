@@ -22,13 +22,13 @@ def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', 
             
     return final_groups
 
-def detect_passes(obs_per_station:pd.DataFrame, min_obs_count, columns_to_keep) -> pd.DataFrame:
+def detect_passes(obs_per_station:pd.DataFrame, min_obs_count, elev_thres, columns_to_keep) -> pd.DataFrame:
 
     pass_counter = 1
     pass_per_station = []
 
     # divide the observations to groups according to max_gap_seconds
-    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station, max_gap_seconds = 9, min_obs_count=min_obs_count)
+    grouped_obs_per_station = split_dataframe_by_time_gap(obs_per_station, elev_thres=elev_thres, max_gap_seconds=9, min_obs_count=min_obs_count)
     
     if not grouped_obs_per_station:
         return pd.DataFrame()
@@ -54,8 +54,9 @@ def detect_passes(obs_per_station:pd.DataFrame, min_obs_count, columns_to_keep) 
     
     for grouped_obs in grouped_obs_per_station:    
 
-        if grouped_obs["L1"].diff().abs().max(skipna=True) > 5e5:
-        # abnormal phase observation; large jumps between epoches
+        if grouped_obs["L1"].diff().abs().max(skipna=True) > 5e5 and len(grouped_obs["obs_epoch"].dt.date.unique()) == 1:
+        # abnormal phase observation: large jumps between epoches
+        # a jump in phase obs is universal in cross-day epoch, only in this case the jump can be tolerated (only one single jump at that one epoch)
             continue
 
         elev_rad = np.deg2rad(grouped_obs['elevation'].values)
@@ -107,10 +108,9 @@ def detect_passes(obs_per_station:pd.DataFrame, min_obs_count, columns_to_keep) 
             beta_sub, _, _, _ = np.linalg.lstsq(X_sub, y_sub, rcond=None)
             residuals_sub = y_sub - X_sub @ beta_sub
             diff_res_sub = np.diff(residuals_sub)
-
             jump_idx = np.where(np.abs(diff_res_sub) > 3.5)[0] + 1
             jump_idx = np.hstack(([0], jump_idx, [len(y_sub)]))
-
+            
             for j in range(len(jump_idx) - 1):
                 seg_start = start + jump_idx[j]
                 seg_end = start + jump_idx[j + 1]

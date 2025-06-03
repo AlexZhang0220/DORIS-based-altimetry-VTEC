@@ -25,10 +25,11 @@ if __name__ == '__main__':
 
     start_time = time.time()
     
-    year, month, day = 2024, 5, 8
+    year, month, day = 2019, 11, 30
     proc_days = 30
     proc_sate = satellite_list[1]
-    min_obs_count = 30 # minimum obs count requirement for a pass
+    min_obs_count = 30 # minimum obs count required for a pass
+    elev_thres = 10
     range_ratio = range_ratio_list[0]
 
     columns_to_keep = [
@@ -50,7 +51,7 @@ if __name__ == '__main__':
         ## Detection and remove of cycle slip 
         pass_all_station= []
         for station_code, grouped_obs in obs.storage.groupby('station_code'):
-            pass_all_station.append(detect_passes(grouped_obs, min_obs_count, columns_to_keep))
+            pass_all_station.append(detect_passes(grouped_obs, min_obs_count, elev_thres, columns_to_keep))
             
         pass_all_station = pd.concat(pass_all_station, ignore_index=True)
         

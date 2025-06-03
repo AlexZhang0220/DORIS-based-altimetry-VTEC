@@ -35,8 +35,11 @@ def regenerate_daily_obs_with_margin(
     start_time: pd.Timestamp,
     end_time: pd.Timestamp,
     data_dir: Path,
-    margin_minutes: int = 30,
+    margin_minutes: int = 10,
 ):
+    '''
+    add more data towards the edge of the day, so continous passes can be formed there
+    '''    
     year = start_time.year
     margin = pd.Timedelta(minutes=margin_minutes)
 
@@ -91,11 +94,12 @@ if __name__ == '__main__':
     start_dt = pd.Timestamp(year, month, day)
     end_dt = pd.Timestamp(year, month, day) + pd.Timedelta(days=proc_days - 1)
 
+    # Station coordinate--sinex file
     file = './DORISInput/sinex/dpod2020_031.snx'
     stations = StationStorage()
     stations.read_sinex(file, start_dt, end_dt)
 
-    # no need for a whole class to read in sp3 file, only orbit data
+    # Satellite coordinate--sp3 file
     sp3_dir = "./DORISInput/sp3"
     matching_sp3 = find_covering_sp3_files_from_dir(start_dt, end_dt, sp3_dir)
     sp3_file_list = []
@@ -104,6 +108,7 @@ if __name__ == '__main__':
         sp3_file_list.append(sp3_file)
     orbit_data = xr.concat(sp3_file_list, dim="time")
     
+    # DORIS observation--rinex file
     obs_dir = Path("./DORISObsStorage/" + proc_sate)
     for i in range(proc_days):
         process_epoch = pd.Timestamp(year, month, day) + pd.Timedelta(days=i)
@@ -118,7 +123,7 @@ if __name__ == '__main__':
         with open(output_path, "wb") as f:
             pickle.dump(obs, f)
 
-    regenerate_daily_obs_with_margin(start_dt, end_dt, obs_dir, margin_minutes=30)
+    regenerate_daily_obs_with_margin(start_dt, end_dt, obs_dir, margin_minutes=10)
 
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
 

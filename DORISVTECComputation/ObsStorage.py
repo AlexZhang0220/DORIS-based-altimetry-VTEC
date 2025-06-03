@@ -100,8 +100,8 @@ def _parse_lines_chunk_df(lines: list[str], obs_type: list[str], PRN: str, stati
             receiver_clock_offset = float(line[44:56])
         elif line.startswith("D"):
             ID = int(line[1:3]) # station id in rinex header
-            if line[50] == '7':  # elevation < 5° -> skip
-                continue
+            # if line[50] == '7':  # elevation < 5° -> skip
+            #     continue
             obs_fields = [float(line[j:j + 14].strip()) for j in range(3, 83, 16)]
             record = {
                 "obs_epoch": current_epoch,
