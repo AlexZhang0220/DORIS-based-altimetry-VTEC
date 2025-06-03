@@ -42,35 +42,37 @@ def compute_roti(ns_doris_time, ref_epoch, time_gap=150):
 
     return np.std(rates) if rates else np.nan
 
-def load_and_flatten_json(path):
+def load_json(path):
     with open(path, 'r') as f:
-        data = json.load(f)
-    return np.array([item for sublist in data for item in sublist])
+        return json.load(f)
 
 def load_altimetry_data_as_dataframe(month, day):
 
     base_time = np.datetime64('1985-01-01T00:00:00')
 
-    lon = load_and_flatten_json(f'./AltimetryData/Orbit/{month}{day}glon.json')
-    lat = load_and_flatten_json(f'./AltimetryData/Orbit/{month}{day}glat.json')
-    sec = load_and_flatten_json(f'./AltimetryData/Epoch/{month}{day}sec.json')
-    dion = load_and_flatten_json(f'./AltimetryData/Dion/{month}{day}dion.json')
+    lon = load_json(f'./AltimetryData/Orbit/{month}{day}glon.json')
+    lat = load_json(f'./AltimetryData/Orbit/{month}{day}glat.json')
+    sec = load_json(f'./AltimetryData/Epoch/{month}{day}sec.json')
+    msec = load_json(f'./AltimetryData/Epoch/{month}{day}msec.json')
+    dion = load_json(f'./AltimetryData/Dion/{month}{day}dion.json')
 
-    valid = ~np.isnan(dion)
-    lon, lat, sec, dion = (arr[valid] for arr in (lon, lat, sec, dion))
+    all_data = []
 
-    lon = lon % 360
+    for pass_id, (sec_list, msec_list, dion_list, glat_list, glon_list) in enumerate(zip(sec, msec, dion, lat, lon), 1):
 
-    obs_epoch = base_time + sec.astype('timedelta64[s]')
+        timestamps = base_time + np.array(sec_list).astype('timedelta64[s]') + (np.array(msec_list) * 1e9).astype('timedelta64[ns]')
+        ion_delay = (-13.575e9**2) / 40.3 * np.array(dion_list) / 1e16
 
-    ion_delay = (-13.575e9**2) / 40.3 * dion / 1e16
+        pass_data = {
+            'obs_epoch': timestamps,
+            'ipp_lat': glat_list,
+            'ipp_lon': glon_list,
+            'vtec': ion_delay,
+            'ascend': len(glat_list) * [(glat_list[-1] - glat_list[0]) > 0] # same pass_id for elements in the same inner list
+        }
+        all_data.append(pass_data)
 
-    df = pd.DataFrame({
-        'ipp_lon': lon,
-        'ipp_lat': lat,
-        'obs_epoch': obs_epoch,
-        'VTEC': ion_delay
-    })
+    df = pd.concat([pd.DataFrame(data) for data in all_data], ignore_index=True)
 
     return df
 
