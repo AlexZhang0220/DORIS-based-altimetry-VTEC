@@ -88,8 +88,8 @@ if __name__ == '__main__':
 
     start_time = time.time()
 
-    year, month, day = 2024, 5, 8
-    proc_days = 30
+    year, month, day = 2024, 5, 1
+    proc_days = 120
     proc_sate = satellite_list[1]
     start_dt = pd.Timestamp(year, month, day)
     end_dt = pd.Timestamp(year, month, day) + pd.Timedelta(days=proc_days - 1)

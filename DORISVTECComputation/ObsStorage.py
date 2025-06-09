@@ -32,10 +32,10 @@ class DORISStorage:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
                 # Skip header, read into memory
                 mmapped_file.seek(mmapped_file.find(b"END OF HEADER") + len("END OF HEADER\n"))
-                lines = mmapped_file.read().decode('utf-8').splitlines()
+                main_obs = mmapped_file.read().decode('utf-8').splitlines()
 
         df_obs = (
-            _parse_lines_chunk_df(lines, header_info.obs_type, header_info.PRN, self.stations)
+            _parse_obs_df(main_obs, header_info.obs_type, header_info.PRN, self.stations)
             .pipe(interpolate_satellite_positions_lagrange, orbit_data, header_info.PRN)
             .pipe(merge_station_position, station_data.storage)
             .pipe(get_elevation_and_map_value) 
@@ -87,7 +87,7 @@ class DORISStorage:
 
         return RINEXHeaderInfo(obs_type, stations, PRN)
     
-def _parse_lines_chunk_df(lines: list[str], obs_type: list[str], PRN: str, stations: list[DORISBeacon]) -> pd.DataFrame:
+def _parse_obs_df(lines: list[str], obs_type: list[str], PRN: str, stations: list[DORISBeacon]) -> pd.DataFrame:
     records = []
     current_epoch = None
     receiver_clock_offset = None

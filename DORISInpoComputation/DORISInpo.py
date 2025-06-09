@@ -8,8 +8,7 @@ import time
 import pickle
 import pandas as pd
 import constant as const
-import json
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 def compute_roti(ns_doris_time, ref_epoch, time_gap=150):
 
@@ -42,40 +41,6 @@ def compute_roti(ns_doris_time, ref_epoch, time_gap=150):
 
     return np.std(rates) if rates else np.nan
 
-def load_json(path):
-    with open(path, 'r') as f:
-        return json.load(f)
-
-def load_altimetry_data_as_dataframe(month, day):
-
-    base_time = np.datetime64('1985-01-01T00:00:00')
-
-    lon = load_json(f'./AltimetryData/Orbit/{month}{day}glon.json')
-    lat = load_json(f'./AltimetryData/Orbit/{month}{day}glat.json')
-    sec = load_json(f'./AltimetryData/Epoch/{month}{day}sec.json')
-    msec = load_json(f'./AltimetryData/Epoch/{month}{day}msec.json')
-    dion = load_json(f'./AltimetryData/Dion/{month}{day}dion.json')
-
-    all_data = []
-
-    for pass_id, (sec_list, msec_list, dion_list, glat_list, glon_list) in enumerate(zip(sec, msec, dion, lat, lon), 1):
-
-        timestamps = base_time + np.array(sec_list).astype('timedelta64[s]') + (np.array(msec_list) * 1e9).astype('timedelta64[ns]')
-        ion_delay = (-13.575e9**2) / 40.3 * np.array(dion_list) / 1e16
-
-        pass_data = {
-            'obs_epoch': timestamps,
-            'ipp_lat': glat_list,
-            'ipp_lon': glon_list,
-            'vtec': ion_delay,
-            'ascend': len(glat_list) * [(glat_list[-1] - glat_list[0]) > 0] # same pass_id for elements in the same inner list
-        }
-        all_data.append(pass_data)
-
-    df = pd.concat([pd.DataFrame(data) for data in all_data], ignore_index=True)
-
-    return df
-
 def main_processing_pipeline(df_altimetry: pd.DataFrame, df_doris: pd.DataFrame, settings):
 
     ns_altimetry = df_altimetry.to_records(index=False) # from dataframe to numpy stuructured array
@@ -89,51 +54,67 @@ def main_processing_pipeline(df_altimetry: pd.DataFrame, df_doris: pd.DataFrame,
     roti_list = np.full(length, np.nan)
 
     for idx, row in enumerate(ns_altimetry):
-            
-            lat, lon = row['ipp_lat'], row['ipp_lon'] % 360
 
-            # --- Time filtering ---
-            time_diff_sec = np.abs((df_doris['obs_epoch'] - row['obs_epoch']) / np.timedelta64(1, 's'))
-            time_mask = time_diff_sec < 400
+        # if row['ascend']: continue # bool type, true means the pass is asceding
 
-            if np.count_nonzero(time_mask) < settings['min_obs_count']:
-                continue
+        lat, lon = row['ipp_lat'], row['ipp_lon'] % 360
 
-            ns_doris_time = ns_doris[time_mask]
+        # --- Time filtering ---
+        time_diff_sec = np.abs((df_doris['obs_epoch'] - row['obs_epoch']) / np.timedelta64(1, 's'))
+        time_mask = time_diff_sec < 400
 
-            # --- Earth rotation correction ---
-            omega = const.omega
-            delta_t = (ns_doris_time['obs_epoch'] - row['obs_epoch']) / np.timedelta64(1, 's')
-            delta_lon_deg = np.degrees(omega * delta_t)
-            corrected = ns_doris_time['ipp_lon'] + delta_lon_deg
-            ns_doris_time['ipp_lon'] = corrected % 360
+        if np.count_nonzero(time_mask) < settings['min_obs_count']:
+            continue
 
-            # --- ROTI calculation ---
-            roti = compute_roti(ns_doris_time, row['obs_epoch'], settings['roti_sec_gap'])
-            roti_list[idx] = roti
+        ns_doris_time = ns_doris[time_mask]
 
-            # --- Window search & interpolation ---
-            if roti < settings['roti_threshold']:
-                lat_gap = settings['lat_gap_lf']
-                lon_gap_km = lat_gap * 2 * 111
-                while lat_gap <= settings['max_lat_gap_lf']:
-                    lon_deg_diff = np.abs((ns_doris_time['ipp_lon'] - lon + 180) % 360 - 180)
-                    lon_km = np.cos(np.radians(ns_doris_time['ipp_lat'])) * 111.0 * lon_deg_diff
-                    combined = (np.abs(ns_doris_time['ipp_lat'] - lat) <= lat_gap) & (lon_km <= lon_gap_km)
-                    if np.count_nonzero(combined) >= settings['min_obs_count']:
-                        ns_doris_inpo = ns_doris_time[combined]
-                        distances = np.array(haversine_vec(lat, lon, ns_doris_inpo['ipp_lat'], ns_doris_inpo['ipp_lon']))
-                        weighted_vtec = idw(distances, ns_doris_inpo['VTEC'])
-                        doris_vtec[idx] = weighted_vtec
-                        doris_points_std[idx] = np.std(ns_doris_inpo['VTEC'])
-                        window_size[idx] = lat_gap            
-                        break
-                    lat_gap += 1
-                    lon_gap_km += 2 * 111
-                doris_points_count[idx] = np.count_nonzero(combined)
+        # --- Earth rotation correction ---
+        omega = const.omega
+        delta_t = (ns_doris_time['obs_epoch'] - row['obs_epoch']) / np.timedelta64(1, 's')
+        delta_lon_deg = np.degrees(omega * delta_t)
+        corrected = ns_doris_time['ipp_lon'] + delta_lon_deg
+        ns_doris_time['ipp_lon'] = corrected % 360
 
-            elif roti >= settings['roti_threshold']:
-                lat_gap = settings['lat_gap_hf']
+        # --- ROTI calculation ---
+        roti = compute_roti(ns_doris_time, row['obs_epoch'], settings['roti_sec_gap'])
+        roti_list[idx] = roti
+
+        # --- Window search & interpolation ---
+        if roti < settings['roti_threshold']:
+            lat_gap = settings['lat_gap_lf']
+            lon_gap_km = lat_gap * 2 * 111
+            while lat_gap <= settings['max_lat_gap_lf']:
+                lon_deg_diff = np.abs((ns_doris_time['ipp_lon'] - lon + 180) % 360 - 180)
+                lon_km = np.cos(np.radians(ns_doris_time['ipp_lat'])) * 111.0 * lon_deg_diff
+                combined = (np.abs(ns_doris_time['ipp_lat'] - lat) <= lat_gap) & (lon_km <= lon_gap_km)
+                if np.count_nonzero(combined) >= settings['min_obs_count']:
+                    ns_doris_inpo = ns_doris_time[combined]
+                    distances = np.array(haversine_vec(lat, lon, ns_doris_inpo['ipp_lat'], ns_doris_inpo['ipp_lon']))
+                    weighted_vtec = idw(distances, ns_doris_inpo['VTEC'])
+                    doris_vtec[idx] = weighted_vtec
+                    doris_points_std[idx] = np.std(ns_doris_inpo['VTEC'])
+                    window_size[idx] = lat_gap            
+                    break
+                lat_gap += 1
+                lon_gap_km += 2 * 111
+            doris_points_count[idx] = np.count_nonzero(combined)
+
+        elif roti >= settings['roti_threshold']:
+            lat_gap = settings['lat_gap_hf']
+            lon_gap_km = lat_gap * 2 * 111
+            lon_deg_diff = np.abs((ns_doris_time['ipp_lon'] - lon + 180) % 360 - 180)
+            lon_km = np.cos(np.radians(ns_doris_time['ipp_lat'])) * 111.0 * lon_deg_diff
+            combined = (np.abs(ns_doris_time['ipp_lat'] - lat) <= lat_gap) & (lon_km <= lon_gap_km)
+            if np.count_nonzero(combined) >= settings['min_obs_count']:
+                ns_doris_inpo = ns_doris_time[combined]
+                distances = np.array(haversine_vec(lat, lon, ns_doris_inpo['ipp_lat'], ns_doris_inpo['ipp_lon']))
+                weighted_vtec = idw(distances, ns_doris_inpo['VTEC'])
+                doris_vtec[idx] = weighted_vtec
+                doris_points_std[idx] = np.std(ns_doris_inpo['VTEC'])
+                window_size[idx] = lat_gap
+
+            else:
+                lat_gap = settings['lat_gap_hf_big']
                 lon_gap_km = lat_gap * 2 * 111
                 lon_deg_diff = np.abs((ns_doris_time['ipp_lon'] - lon + 180) % 360 - 180)
                 lon_km = np.cos(np.radians(ns_doris_time['ipp_lat'])) * 111.0 * lon_deg_diff
@@ -146,21 +127,7 @@ def main_processing_pipeline(df_altimetry: pd.DataFrame, df_doris: pd.DataFrame,
                     doris_points_std[idx] = np.std(ns_doris_inpo['VTEC'])
                     window_size[idx] = lat_gap
 
-                else:
-                    lat_gap = settings['lat_gap_hf_big']
-                    lon_gap_km = lat_gap * 2 * 111
-                    lon_deg_diff = np.abs((ns_doris_time['ipp_lon'] - lon + 180) % 360 - 180)
-                    lon_km = np.cos(np.radians(ns_doris_time['ipp_lat'])) * 111.0 * lon_deg_diff
-                    combined = (np.abs(ns_doris_time['ipp_lat'] - lat) <= lat_gap) & (lon_km <= lon_gap_km)
-                    if np.count_nonzero(combined) >= settings['min_obs_count']:
-                        ns_doris_inpo = ns_doris_time[combined]
-                        distances = np.array(haversine_vec(lat, lon, ns_doris_inpo['ipp_lat'], ns_doris_inpo['ipp_lon']))
-                        weighted_vtec = idw(distances, ns_doris_inpo['VTEC'])
-                        doris_vtec[idx] = weighted_vtec
-                        doris_points_std[idx] = np.std(ns_doris_inpo['VTEC'])
-                        window_size[idx] = lat_gap
-
-                doris_points_count[idx] = np.count_nonzero(combined)
+            doris_points_count[idx] = np.count_nonzero(combined)
 
     ns_altimetry_updated = rfn.append_fields(
         ns_altimetry,
@@ -192,16 +159,16 @@ if __name__ == '__main__':
     range_ratio = range_ratio_list[0]
 
     start_date = datetime(2024, 5, 8)
-    num_days = 10
+    num_days = 30
     settings = {
-        'ele_mask': 10,
-        'roti_threshold': 100, 
-        'roti_sec_gap': 250,
+        'ele_mask': 15,
+        'roti_threshold': 1, 
+        'roti_sec_gap': 150,
         'min_obs_count': 30,
         'lat_gap_lf': 1,
-        'max_lat_gap_lf': 10,
+        'max_lat_gap_lf': 6,
         'lat_gap_hf': 6,
-        'lat_gap_hf_big': 10
+        'lat_gap_hf_big': 6
     }
 
     for day_offset in range(num_days):
@@ -212,7 +179,8 @@ if __name__ == '__main__':
         with open(f'./DORISVTECStorage/{proc_sate}/{year}/DOY{doy:03d}.pickle', 'rb') as path:
             df_doris = pickle.load(path)
 
-        df_altimetry = load_altimetry_data_as_dataframe(month, day)
+        with open(f'./AltimetryVTECStorage/{proc_sate}/{year}/DOY{doy:03d}.pickle', 'rb') as path:
+            df_altimetry = pickle.load(path)
 
         ion_file = (
             f"./DORISInput/IGSGIM/{year}/igsg{doy:03d}0.{str(year)[-2:]}i"
@@ -237,11 +205,23 @@ if __name__ == '__main__':
                 results.append(result_df)
         df_doris_result = pd.concat(results, ignore_index=True)
         df_doris_result = df_doris_result.sort_values('obs_epoch').reset_index(drop=True)
-        doris_vtec_diff = df_altimetry['VTEC'] - df_doris_result['doris_vtec']
-        non_nan_indices = np.where(~np.isnan(doris_vtec_diff.values))[0]
-        doris_vtec_rms = np.sqrt(np.mean(doris_vtec_diff[non_nan_indices] ** 2))
-        gim_vtec_rms_doris = np.sqrt(np.mean(gim_vtec_diff[non_nan_indices] ** 2))
+        lon_adjusted = (df_doris_result['ipp_lon'] + 180) % 360 - 180 
+        df_doris_result['local_time'] = df_doris_result['obs_epoch'] + pd.to_timedelta(lon_adjusted / 15, unit='h')
+        df_doris_result.drop(columns='hour', inplace=True)
 
-        print(doris_vtec_rms, gim_vtec_rms_doris, len(doris_vtec_diff[non_nan_indices]) / len(doris_vtec_diff))
+        df_doris_result['gim_vtec'] = gim_vtec_interp
+
+        df_doris_result.to_csv(f"./DORISInpoOutput/{year}/DOY{doy}Ele{settings['ele_mask']}.csv")
+
+
+        # roti_mean = np.mean(df_doris_result['roti'])
+        # vtec_mean = np.mean(df_doris_result['doris_vtec'])
+        # doris_vtec_diff = df_doris_result['VTEC'] - df_doris_result['doris_vtec']
+
+        # non_nan_indices = np.where(~np.isnan(doris_vtec_diff.values))[0]
+        # doris_vtec_rms = np.sqrt(np.mean(doris_vtec_diff[non_nan_indices] ** 2))
+        # gim_vtec_rms_doris = np.sqrt(np.mean(gim_vtec_diff[non_nan_indices] ** 2))
+
+
         
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")
