@@ -1,10 +1,13 @@
 # 忽略你指定的子目录
-DORISVTEC/
+DORISVTECStorage/
 DORISInput/
 DORISObsStorage/
-Visulization/
-AltimetryData/
+DORISInpoOutput/
 
+
+Articles/
+AltimetryVTECStorage/
+AltimetryInput/
 # 忽略常见的大文件、文献、数据格式
 *.pdf
 *.docx

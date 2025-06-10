@@ -1,11 +1,10 @@
-c 	=			299792458	                    #speed of light [m/s]
-AE84  =         6378137.0                       #earth radius [m]
-FLAT84  =       0.00335281066474	            #flattening
+c 	       =	299792458	                    #speed of light [m/s]
+AE84       =    6378137.0                       #earth radius [m]
+FLAT84     =    0.00335281066474	            #flattening
 FLATINV84  =   	298.257223563
-omega      =    7.2921159e-5                    # rad/s
+
 ion_height =    506700
 
-d_altimetry   =  -13.575e9**2                           # frequency 
 d_f1	      =	 2036.25*1000000.0			    	    # frequency on L1 [hz]
 d_f2 	      =	 401.25*1000000.0			            # frequency on L2 [hz]
 d_lambda1 	  =	 c/d_f1							        # wavelength of L1 [m] = 0.147m
