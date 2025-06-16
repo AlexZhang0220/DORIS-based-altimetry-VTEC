@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import pandas as pd
 import pickle
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 def correct_pass_vtec(pass_df, max_row, igs_vtec, range_ratio=1.0):
     igs_stec = igs_vtec * max_row['map_value']
@@ -25,8 +25,8 @@ if __name__ == '__main__':
 
     start_time = time.time()
     
-    year, month, day = 2019, 11, 30
-    proc_days = 30
+    year, month, day = 2024, 5, 9
+    proc_days = 1
     proc_sate = satellite_list[1]
     min_obs_count = 30 # minimum obs count required for a pass
     elev_thres = 10
@@ -49,10 +49,12 @@ if __name__ == '__main__':
         # sat_clock_offset = compute_sat_clock_corrections(process_epoch, obs)
         
         ## Detection and remove of cycle slip 
-        pass_all_station= []
+        pass_all_station, elev_all_station, residual_all_station = [], [], []
         for station_code, grouped_obs in obs.storage.groupby('station_code'):
-            pass_all_station.append(detect_passes(grouped_obs, min_obs_count, elev_thres, columns_to_keep))
-            
+            # for elevation-noise, 2024DOY129-COBB is a good illustration
+            if station_code == 'COBB':
+                pass_all_station.append(detect_passes(grouped_obs, min_obs_count, elev_thres, columns_to_keep))
+
         pass_all_station = pd.concat(pass_all_station, ignore_index=True)
         
         ion_file = (
@@ -86,7 +88,7 @@ if __name__ == '__main__':
         ## storage of pass with VTEC into file
         pass_file_name = Path(f'./DORISVTECStorage/{proc_sate}/{year}/DOY{doy:03d}.pickle')
         pass_file_name.parent.mkdir(parents=True, exist_ok=True)
-        with open(pass_file_name, "wb") as f:
-            pickle.dump(pass_all_station_processed, f)
+        # with open(pass_file_name, "wb") as f:
+        #     pickle.dump(pass_all_station_processed, f)
 
     print(f"Elapsed time: {time.time() - start_time:.2f} seconds")

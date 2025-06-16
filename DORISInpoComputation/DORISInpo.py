@@ -43,6 +43,8 @@ def compute_roti(ns_doris_time, ref_epoch, time_gap=150):
 
 def main_processing_pipeline(df_altimetry: pd.DataFrame, df_doris: pd.DataFrame, settings):
 
+    df_doris = df_doris[df_doris['elevation'] > settings['ele_mask']].reset_index(drop=True)
+
     ns_altimetry = df_altimetry.to_records(index=False) # from dataframe to numpy stuructured array
     ns_doris = df_doris.to_records(index=False) 
     length = len(ns_altimetry)
@@ -100,6 +102,7 @@ def main_processing_pipeline(df_altimetry: pd.DataFrame, df_doris: pd.DataFrame,
             doris_points_count[idx] = np.count_nonzero(combined)
 
         elif roti >= settings['roti_threshold']:
+            continue
             lat_gap = settings['lat_gap_hf']
             lon_gap_km = lat_gap * 2 * 111
             lon_deg_diff = np.abs((ns_doris_time['ipp_lon'] - lon + 180) % 360 - 180)
@@ -159,16 +162,16 @@ if __name__ == '__main__':
     range_ratio = range_ratio_list[0]
 
     start_date = datetime(2024, 5, 8)
-    num_days = 30
+    num_days = 1
     settings = {
-        'ele_mask': 15,
+        'ele_mask': 10,
         'roti_threshold': 1, 
         'roti_sec_gap': 150,
         'min_obs_count': 30,
         'lat_gap_lf': 1,
-        'max_lat_gap_lf': 6,
-        'lat_gap_hf': 6,
-        'lat_gap_hf_big': 6
+        'max_lat_gap_lf': 10,
+        'lat_gap_hf': 1,
+        'lat_gap_hf_big': 10
     }
 
     for day_offset in range(num_days):
@@ -214,13 +217,15 @@ if __name__ == '__main__':
         df_doris_result.to_csv(f"./DORISInpoOutput/{year}/DOY{doy}Ele{settings['ele_mask']}.csv")
 
 
-        # roti_mean = np.mean(df_doris_result['roti'])
-        # vtec_mean = np.mean(df_doris_result['doris_vtec'])
-        # doris_vtec_diff = df_doris_result['VTEC'] - df_doris_result['doris_vtec']
+        roti_mean = np.mean(df_doris_result['roti'])
+        vtec_mean = np.mean(df_doris_result['doris_vtec'])
+        doris_vtec_diff = df_doris_result['VTEC'] - df_doris_result['doris_vtec']
 
-        # non_nan_indices = np.where(~np.isnan(doris_vtec_diff.values))[0]
-        # doris_vtec_rms = np.sqrt(np.mean(doris_vtec_diff[non_nan_indices] ** 2))
-        # gim_vtec_rms_doris = np.sqrt(np.mean(gim_vtec_diff[non_nan_indices] ** 2))
+        non_nan_indices = np.where(~np.isnan(doris_vtec_diff.values))[0]
+        doris_vtec_rms = np.sqrt(np.mean(doris_vtec_diff[non_nan_indices] ** 2))
+        gim_vtec_rms_doris = np.sqrt(np.mean(gim_vtec_diff[non_nan_indices] ** 2))
+
+        print(doris_vtec_rms, gim_vtec_rms_doris, len(doris_vtec_diff[non_nan_indices]), len(doris_vtec_diff))
 
 
         

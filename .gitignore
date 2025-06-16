@@ -3,11 +3,11 @@ DORISVTECStorage/
 DORISInput/
 DORISObsStorage/
 DORISInpoOutput/
-
+AltimetryVTECStorage
 
 Articles/
 AltimetryVTECStorage/
-AltimetryInput/
+
 # 忽略常见的大文件、文献、数据格式
 *.pdf
 *.docx
