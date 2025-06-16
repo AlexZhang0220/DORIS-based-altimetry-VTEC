@@ -2,8 +2,13 @@
 DORISVTECStorage/
 DORISInput/
 DORISObsStorage/
+DORISInpoOutput/
+AltimetryVTECStorage
+build/
 Articles/
 AltimetryVTECStorage/
+Results/
+
 # 忽略常见的大文件、文献、数据格式
 *.pdf
 *.docx

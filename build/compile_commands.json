@@ -1,0 +1,56 @@
+[
+{
+  "directory": "D:/Master Thesis/build",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\iri_driver.f90\" -o CMakeFiles\\iri2020_driver.dir\\src\\iri_driver.f90.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/iri_driver.f90",
+  "output": "CMakeFiles/iri2020_driver.dir/src/iri_driver.f90.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\irisub.for\" -o CMakeFiles\\iri.dir\\irisub.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/irisub.for",
+  "output": "src/CMakeFiles/iri.dir/irisub.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\irifun.for\" -o CMakeFiles\\iri.dir\\irifun.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/irifun.for",
+  "output": "src/CMakeFiles/iri.dir/irifun.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\iritec.for\" -o CMakeFiles\\iri.dir\\iritec.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/iritec.for",
+  "output": "src/CMakeFiles/iri.dir/iritec.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\iridreg.for\" -o CMakeFiles\\iri.dir\\iridreg.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/iridreg.for",
+  "output": "src/CMakeFiles/iri.dir/iridreg.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\iriflip.for\" -o CMakeFiles\\iri.dir\\iriflip.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/iriflip.for",
+  "output": "src/CMakeFiles/iri.dir/iriflip.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\igrf.for\" -o CMakeFiles\\iri.dir\\igrf.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/igrf.for",
+  "output": "src/CMakeFiles/iri.dir/igrf.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\cira.for\" -o CMakeFiles\\iri.dir\\cira.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/cira.for",
+  "output": "src/CMakeFiles/iri.dir/cira.for.obj"
+},
+{
+  "directory": "D:/Master Thesis/build/src",
+  "command": "D:\\mingw64\\bin\\gfortran.exe   -g -c \"D:\\Master Thesis\\iri2020\\src\\iri2020\\src\\rocdrift.for\" -o CMakeFiles\\iri.dir\\rocdrift.for.obj",
+  "file": "D:/Master Thesis/iri2020/src/iri2020/src/rocdrift.for",
+  "output": "src/CMakeFiles/iri.dir/rocdrift.for.obj"
+}
+]
