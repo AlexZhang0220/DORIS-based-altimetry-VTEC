@@ -10,12 +10,12 @@ doris_vtec_diff_list, gim_vtec_diff_list = [], []
 alt_vtec_list = []
 doris_vtec_rms_list_2024, gim_vtec_rms_list_2024, alt_vtec_mean_list = [], [], []
 doris_vtec_std = [] 
-# for filename in os.listdir(folder_path):
-#     if filename[6:11] == 'Ele10':
+for filename in os.listdir(folder_path):
+    if filename[6:11] == 'Ele10':
         
-#         df_doris_result = pd.read_csv(folder_path+'/'+filename)  
-#         # 确保 obs_epoch 是 datetime 类型
-#         df_doris_result['obs_epoch'] = pd.to_datetime(df_doris_result['obs_epoch'])
+        df_doris_result = pd.read_csv(folder_path+'/'+filename)  
+        # 确保 obs_epoch 是 datetime 类型
+        df_doris_result['obs_epoch'] = pd.to_datetime(df_doris_result['obs_epoch'])
 
 #         # 取前12小时数据
 #         start_time = pd.Timestamp(2024,5,8,12,0,0) # 向下取整到整点，确保从00:00开始

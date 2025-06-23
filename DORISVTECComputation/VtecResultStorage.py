@@ -52,7 +52,7 @@ if __name__ == '__main__':
         pass_all_station, elev_all_station, residual_all_station = [], [], []
         for station_code, grouped_obs in obs.storage.groupby('station_code'):
             # for elevation-noise, 2024DOY129-COBB is a good illustration
-            if station_code == 'COBB':
+            if station_code == 'MALC':
                 pass_all_station.append(detect_passes(grouped_obs, min_obs_count, elev_thres, columns_to_keep))
 
         pass_all_station = pd.concat(pass_all_station, ignore_index=True)

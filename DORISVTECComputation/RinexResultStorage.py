@@ -20,7 +20,7 @@ def find_covering_sp3_files_from_dir(start_time: pd.Timestamp, end_time: pd.Time
         raise ValueError(f"Provided path {folder_path} is not a valid directory.")
     
     matching_files = []
-    for sp3_file in folder.glob("*.sp3"):
+    for sp3_file in folder.glob("*.sp3.001"):
         match = re.search(r'\.b(\d{5})\.e(\d{5})\.', sp3_file.name)
         if match:
             b_yydoy = int(match.group(1))
@@ -44,7 +44,7 @@ def regenerate_daily_obs_with_margin(
     margin = pd.Timedelta(minutes=margin_minutes)
 
     def load_day_data(doy: int) -> pd.DataFrame:
-        path = data_dir / f"{year}/DOY{doy:03d}.pickle"
+        path = data_dir / f"{year}/DOY{doy:03d}.pkl"
         try:
             with open(path, "rb") as f:
                 return pickle.load(f)
@@ -78,7 +78,7 @@ def regenerate_daily_obs_with_margin(
         new_obs.storage = df_window
         new_obs.stations = curr_obs.stations
 
-        out_path = data_dir / f"{year}/DOY{doy:03d}.pickle"
+        out_path = data_dir / f"{year}/DOY{doy:03d}.pkl"
         with open(out_path, "wb") as f:
             pickle.dump(new_obs, f)
 
@@ -88,8 +88,8 @@ if __name__ == '__main__':
 
     start_time = time.time()
 
-    year, month, day = 2019, 11, 30
-    proc_days = 30
+    year, month, day = 2024, 5, 1
+    proc_days = 120
     proc_sate = satellite_list[1]
     start_dt = pd.Timestamp(year, month, day)
     end_dt = pd.Timestamp(year, month, day) + pd.Timedelta(days=proc_days - 1)
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     stations.read_sinex(file, start_dt, end_dt)
 
     # Satellite coordinate--sp3 file
-    sp3_dir = "./DORISInput/sp3"
+    sp3_dir = f"./DORISInput/sp3/{proc_sate}"
     matching_sp3 = find_covering_sp3_files_from_dir(start_dt, end_dt, sp3_dir)
     sp3_file_list = []
     for file in matching_sp3:
@@ -115,10 +115,10 @@ if __name__ == '__main__':
         doy = process_epoch.dayofyear
 
         obs = DORISStorage()
-        file = f'./DORISInput/rinexobs/{proc_sate}rx{str(year)[-2:]}{doy:03d}.001'
+        file = f'./DORISInput/rinexobs/{proc_sate}/{year}/{proc_sate}rx{str(year)[-2:]}{doy:03d}.001'
         obs.read_rinex_300(file, orbit_data, stations)
 
-        output_path = Path(obs_dir) / f"{year}/DOY{doy:03d}.pickle"
+        output_path = Path(obs_dir) / f"{year}/DOY{doy:03d}.pkl"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "wb") as f:
             pickle.dump(obs, f)

@@ -4,54 +4,53 @@ import constant as const
 from scipy.stats import zscore
 import matplotlib.pyplot as plt
 
-# def elev_noise(elevation, residuals, bin_size=5):
-#     import pickle
-#     from scipy.ndimage import gaussian_filter1d
-#     plt.rcParams['font.family'] = 'Times New Roman'
-#     plt.figure(figsize=(17, 9))  # 宽高适配PPT
-#     ax1 = plt.gca()  # 获取当前的坐标轴
-#     with open(f'./DORISObsStorage/ja3/2024/DOY129.pickle', 'rb') as path:
-#         obs = pickle.load(path)
-#         all_elevation = obs.storage['elevation']
-#         all_elevation = all_elevation[all_elevation > 10]
-#     # 绘制原始的散点图
-#     ax1.scatter(elevation, np.array(residuals) / 26**0.5, alpha=0.6, s=30, c='tab:blue')
+def elev_noise(elevation, residuals, bin_size=5):
+    import pickle
+    from scipy.ndimage import gaussian_filter1d
+    plt.rcParams['font.family'] = 'Times New Roman'
+    plt.figure(figsize=(17, 9))  # 宽高适配PPT
+    ax1 = plt.gca()  # 获取当前的坐标轴
+    with open(f'./DORISObsStorage/ja3/2024/DOY129.pickle', 'rb') as path:
+        obs = pickle.load(path)
+        all_elevation = obs.storage['elevation']
+        all_elevation = all_elevation[all_elevation > 10]
+    # 绘制原始的散点图
+    ax1.scatter(elevation, np.array(residuals) / 26**0.5, alpha=0.6, s=30, c='tab:blue')
 
-#     # 设置左侧y轴的标签
-#     ax1.set_xlabel('Elevation [degree]', fontsize=20)
-#     ax1.set_ylabel('Residuals [cycle]', fontsize=20)
-#     ax1.set_title('Relation between Phase Noise and Elevation for Station COBB', fontsize=20)
-#     ax1.tick_params(labelsize=20)
-#     ax1.grid(axis='y', linestyle='--', alpha=0.5)
+    # 设置左侧y轴的标签
+    ax1.set_xlabel('Elevation [degree]', fontsize=20)
+    ax1.set_ylabel('Residuals [cycle]', fontsize=20)
+    ax1.set_title('Relation between Phase Noise and Elevation for Station COBB', fontsize=20)
+    ax1.tick_params(labelsize=20)
+    ax1.grid(axis='y', linestyle='--', alpha=0.5)
 
-#     # 创建右侧y轴，用于绘制百分比曲线
-#     ax2 = ax1.twinx()  # 创建共享x轴的第二个y轴
-#     ax2.set_ylabel('Percentage of Observations [%]', fontsize=20)  # 设置右侧y轴标签
+    # 创建右侧y轴，用于绘制百分比曲线
+    ax2 = ax1.twinx()  # 创建共享x轴的第二个y轴
+    ax2.set_ylabel('Percentage of Observations [%]', fontsize=20)  # 设置右侧y轴标签
 
-#     # 计算每个elevation范围内的观测点数量
-#     bins = np.arange(min(all_elevation), max(all_elevation) + bin_size, bin_size)
-#     binned_counts, _ = np.histogram(all_elevation, bins=bins)
+    # 计算每个elevation范围内的观测点数量
+    bins = np.arange(min(all_elevation), max(all_elevation) + bin_size, bin_size)
+    binned_counts, _ = np.histogram(all_elevation, bins=bins)
 
-#     # 获取第一个bin的数量作为100%
-#     first_bin_count = binned_counts[0]
+    # 获取第一个bin的数量作为100%
+    first_bin_count = binned_counts[0]
     
-#     # 计算百分比（后续bin的百分比基于第一个bin的数量）
-#     percentages = 100 * binned_counts / first_bin_count
+    # 计算百分比（后续bin的百分比基于第一个bin的数量）
+    percentages = 100 * binned_counts / first_bin_count
 
-#     # 绘制百分比曲线
-#     bin_centers = (bins[:-1] + bins[1:]) / 2  # 每个bin的中心
-#     ax2.plot(bin_centers, gaussian_filter1d(percentages, sigma=2), color = 'C1',alpha=0.8, label='Percentage', linewidth=2)
+    # 绘制百分比曲线
+    bin_centers = (bins[:-1] + bins[1:]) / 2  # 每个bin的中心
+    ax2.plot(bin_centers, gaussian_filter1d(percentages, sigma=2), color = 'C1',alpha=0.8, label='Percentage', linewidth=2)
 
-#     # 设置右侧y轴的刻度
-#     ax2.tick_params(labelsize=20)
+    # 设置右侧y轴的刻度
+    ax2.tick_params(labelsize=20)
 
-#     # 调整布局，确保不会有重叠
-#     plt.tight_layout()
+    # 调整布局，确保不会有重叠
+    plt.tight_layout()
 
-#     # 保存图像
-#     plt.savefig('elevation_vs_residuals.png', dpi=600)
-#     plt.show()
-
+    # 保存图像
+    plt.savefig('elevation_vs_residuals.png', dpi=600)
+    plt.show()
 
 def split_dataframe_by_time_gap(df, time_col='obs_epoch', elev_col='elevation', elev_thres=10.0, max_gap_seconds=9, min_obs_count=30) -> list[pd.DataFrame]:
 
@@ -104,6 +103,7 @@ def detect_passes(obs_per_station:pd.DataFrame, min_obs_count, elev_thres, colum
     for grouped_obs in grouped_obs_per_station:    
 
         if grouped_obs["L1"].diff().abs().max(skipna=True) > 5e5 and len(grouped_obs["obs_epoch"].dt.date.unique()) == 1:
+        # if len(grouped_obs["obs_epoch"].dt.date.unique()) == 2： np.diff of L1, if large, correct by 4.2e6    
         # abnormal phase observation: large jumps between epoches
         # a jump in phase obs is universal in cross-day epoch, only in this case the jump can be tolerated (only one single jump at that one epoch)
             continue
